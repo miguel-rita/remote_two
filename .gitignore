@@ -2,3 +2,8 @@ data/*
 !data/data_placeholder.txt
 .DS_Store
 .idea/*
+imps.png
+subs/*
+!subs/subs_placeholder.txt
+utils/__py*
+.ipynb*

@@ -5,81 +5,40 @@ import lightgbm as lgb
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import StratifiedKFold
+import utils.preprocess as utils
 
-# Import train and test meta data
-train = pd.read_csv(os.getcwd() + '/' + 'data/training_set_metadata.csv')
-test = pd.read_csv(os.getcwd() + '/' + 'data/test_set_metadata.csv')
+# Get metadata
+train, test, y_tgt, train_cols = utils.prep_data()
 
-# Check overall info
-print(train.columns, train.shape)
-print(test.columns, test.shape)
+# Get data
+train_feats = pd.read_hdf('data/train_feats/train_set_feats.h5', mode='r')
+train_cols.extend(list(train_feats.columns))
 
-# Check for NAs in metadata
-print('Num. of NAs:')
-print(train.isna().sum())
-print(test.isna().sum())
-
-# Remove spectrometry redshift, distmod feats from both sets
-feats_to_delete = ['hostgal_specz', 'distmod']
-train.drop(feats_to_delete, axis=1, inplace=True)
-test.drop(feats_to_delete, axis=1, inplace=True)
-
-# Feat eng.
-for df in [train, test]:
-    df['is_galactic'] = df['hostgal_photoz'] == 0
-
-# Check feat was created
-print(train.columns, train.shape)
-print(test.columns, test.shape)
-
-# Check class freqs.
-print(train.groupby('target')['object_id'].count())
-
-# Get targets
-y_tgt = train['target'].values
-train.drop(['target'], axis=1)
-
-# Get feat col names
-train_cols = list(train.columns)
-[train_cols.remove(c) for c in ['object_id', 'target']]
-
-# Setup stratified CV
-folds = StratifiedKFold(n_splits=5, shuffle=True, random_state=1)
+# Merge
+train = pd.merge(
+    train,
+    train_feats,
+    how='outer',
+    on='object_id'
+)
 
 # Get sorted class weights
-# class_weights_dict = {
-#     #99 : 2.002408,
-#     95 : 1.001044,
-#     92 : 1.001044,
-#     90 : 1.001044,
-#     88 : 1.001044,
-#     67 : 1.001044,
-#     65 : 1.001044,
-#     64 : 2.007104,
-#     62 : 1.001044,
-#     53 : 1.000000,
-#     52 : 1.001044,
-#     42 : 1.001044,
-#     16 : 1.001044,
-#     15 : 2.001886,
-#     6 : 1.001044,
-# }
 class_weights_dict = {
     #99 : 2.002408,
-    95 : 1,
-    92 : 1,
-    90 : 1,
-    88 : 1,
-    67 : 1,
-    65 : 1,
-    64 : 1,
-    62 : 1,
-    53 : 1,
-    52 : 1,
-    42 : 1,
-    16 : 1,
-    15 : 1,
-    6 : 1,
+    95 : 1.001044,
+    92 : 1.001044,
+    90 : 1.001044,
+    88 : 1.001044,
+    67 : 1.001044,
+    65 : 1.001044,
+    64 : 2.007104,
+    62 : 1.001044,
+    53 : 1.000000,
+    52 : 1.001044,
+    42 : 1.001044,
+    16 : 1.001044,
+    15 : 2.001886,
+    6 : 1.001044,
 }
 class_codes = np.unique(list(class_weights_dict.keys()))
 class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
@@ -128,7 +87,8 @@ def weighted_mc_crossentropy(y_true, y_pred, weighted=True):
     y_true = np.eye(num_classes)[y_true]
 
     # Clip preds for log safety
-    y_pred = np.log(np.clip(y_pred, 1e-15, 1 - 1e-15))
+    eps = np.finfo(float).eps
+    y_pred = np.log(np.clip(y_pred, eps, 1 - eps))
 
     if weighted:
         # Compute avg. loss per class
@@ -147,25 +107,64 @@ def save_importances(imps_):
     plt.tight_layout()
     plt.savefig('imps.png')
 
-importances = pd.DataFrame()
+def save_submission(y_test, sub_name, nrows=None):
 
-for i, (_train, _eval) in enumerate(folds.split(train.values, y_tgt)):
+    # Get submission header
+    col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
+    num_classes = len(col_names) - 1
+
+    # Get test ids
+    object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows, usecols=['object_id']).values.astype(int)
+    num_ids = object_ids.size
+
+    # Naive sub
+    obj_99_prob = np.ones((num_ids, 1)) * 1/10
+    factor = 1-1/10
+    sub = np.hstack([object_ids, y_test*factor, obj_99_prob])
+
+    h = ''
+    for s in col_names:
+        h += s + ','
+    h = h[:-1]
+
+    # Write to file
+    np.savetxt(
+        fname=sub_name,
+        X=sub,
+        fmt=['%d'] + ['%.3f'] * num_classes,
+        delimiter=',',
+        header=h,
+        comments='',
+    )
+
+# CV cycle collectors
+importances = pd.DataFrame()
+y_preds_oof = np.zeros((y_tgt.size, weights.size))
+y_test = np.zeros((test.shape[0], weights.size))
+eval_losses = []
+bsts = []
+
+# Setup stratified CV
+num_folds = 5
+folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
+
+for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
     # Setup fold data
     x_all = train[train_cols].values
     x_train, y_train = x_all[_train], y_tgt[_train]
     x_eval, y_eval = x_all[_eval], y_tgt[_eval]
+    #x_test = test[train_cols].values
 
     # Setup multiclass LGBM
     bst = lgb.LGBMClassifier(
         boosting_type='gbdt',
-        num_leaves=31,
-        learning_rate=0.05,
-        n_estimators=1000,
+        num_leaves=6,
+        learning_rate=0.03,
+        n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
         silent=True,
-        importance_type='gain',
     )
 
     # Train bst
@@ -173,20 +172,20 @@ for i, (_train, _eval) in enumerate(folds.split(train.values, y_tgt)):
         X=x_train,
         y=y_train,
         eval_set=[(x_eval, y_eval)],
-        eval_names=['\ntrain_set', '\neval_set'],
-        eval_class_weight=[class_weights, class_weights],
+        eval_names=['\neval_set'],
+        eval_class_weight=[class_weights],
         eval_metric=lgbm_loss_wrapper,
-        early_stopping_rounds=5,
+        early_stopping_rounds=15,
         verbose=True,
     )
 
-    # Print fold train, val loss
-    y_pred_train, y_pred_eval = bst.predict_proba(x_train), bst.predict_proba(x_eval)
+    # Store oof preds, eval loss
+    y_preds_oof[_eval,:] = bst.predict_proba(x_eval)
+    eval_losses.append(loss_wrapper(y_eval, y_preds_oof[_eval,:])[1])
+    bsts.append(bst)
 
-    print('\nBooster iteration',i,'*'*20)
-    print('\nTrain custom loss : ', loss_wrapper(y_true=y_train, y_pred=y_pred_train)[1])
-    print('Eval custom loss: ', loss_wrapper(y_true=y_eval, y_pred=y_pred_eval)[1])
-    print('\n'+'*'*40+'\n')
+    # Build test predictions
+    #y_test += bst.predict_proba(x_test) / num_folds
 
     # Importance analysis
     imp_df = pd.DataFrame()
@@ -195,16 +194,8 @@ for i, (_train, _eval) in enumerate(folds.split(train.values, y_tgt)):
     imp_df['fold'] = i
     importances = pd.concat([importances, imp_df], axis=0, sort=False)
 
-    # Print true vs pred class dist in train and eval - Obsolete
-    # for s, preds, truths in zip(['train', 'eval'], [y_pred_train, y_pred_eval], [y_train, y_eval]):
-    #     y_pred_1d = pd.Series(class_codes[np.argmax(preds, axis=1)])
-    #     y_true_1d = pd.Series(truths)
-    #     print('\n'+'*'*20)
-    #     print(s)
-    #     print('*'*20)
-    #     print('\nTrue dist:')
-    #     print(y_true_1d.value_counts())
-    #     print('\nPred dist:')
-    #     print(y_pred_1d.value_counts())
-
+print('Mean plasticc metric across folds : ', np.mean(eval_losses))
 save_importances(importances)
+
+#save_submission(y_test, f'./subs/sub_{np.mean(eval_losses):.4f}.csv')
+#
