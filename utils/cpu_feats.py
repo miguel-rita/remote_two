@@ -1,25 +1,38 @@
 import numpy as np
 import pandas as pd
+import multiprocessing
 import tqdm, os, time, gc
 from scipy.stats import kurtosis, skew
+from utils.chunk_test_set import get_splits
 
 # Get existing chunk names
-chunks_dir = '../data/test_chunks/'
-feats_dir = '../data/test_feats/'
-feats_name = 'test_set_feats.h5'
+s = 'train'
+chunks_dir = '../data/'+s+'_chunks/'
+feats_dir = '../data/'+s+'_feats/'
+feats_name = s+'_set_feats_v2.h5'
 
-cnames = os.listdir(chunks_dir)
+cnames = [n for n in os.listdir(chunks_dir) if n != 'dir.txt']
 
 # Compute feats per chunk
 feats_df = pd.DataFrame()
+mt = time.time()
 for cname in cnames:
 
     st = time.time()
     ck = pd.read_hdf(chunks_dir + cname)
     print(f'>   cpu_feats : Loaded chunk in {time.time()-st:.3f} seconds')
 
+
+
+    # Split chunk for multicore processing
+
     # Create feats
-    ts = time.time()
+    st = time.time()
+
+    oids = ck['object_id'].values
+
+
+
     cfeats = pd.pivot_table(
         data = ck,
         values = ['flux'],#, 'mjd'],
@@ -30,7 +43,11 @@ for cname in cnames:
             #'mjd' : [np.ptp],
         }
     )
-    # Convert to float16
+
+
+
+
+    # Convert to float16 and flatten multiindex
     cns = [f'{t[0]}_{t[1]}_{t[2]}' for t in cfeats.columns.to_series().str.join('').index.values]
     cfeats = cfeats.astype(
         {feat_name_ : np.float16 for feat_name_ in cfeats}
@@ -44,7 +61,7 @@ for cname in cnames:
 
 feats_df = feats_df.reset_index().sort_values('object_id').reset_index(drop=True)
 feats_df.to_hdf(feats_dir + feats_name, key='w', mode='w')
-print('Done.')
+print(f'>   cpu_feats : Done in {time.time()-mt:.3f} seconds')
 
 
 

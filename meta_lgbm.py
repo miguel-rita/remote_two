@@ -12,12 +12,18 @@ train, test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
 train_feats = pd.read_hdf('data/train_feats/train_set_feats.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats.h5', mode='r')
 train_cols.extend(list(train_feats.columns))
-
 # Merge
 train = pd.merge(
     train,
     train_feats,
+    how='outer',
+    on='object_id'
+)
+test = pd.merge(
+    test,
+    test_feats,
     how='outer',
     on='object_id'
 )
