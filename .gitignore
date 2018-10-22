@@ -7,3 +7,6 @@ subs/*
 !subs/subs_placeholder.txt
 utils/__py*
 .ipynb*
+subs_freq_probe/*
+!subs_freq_probe/placeholder.txt
+

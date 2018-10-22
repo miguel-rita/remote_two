@@ -11,9 +11,11 @@ import utils.preprocess as utils
 train, test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
-train_feats = pd.read_hdf('data/train_feats/train_set_feats.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats.h5', mode='r')
+produce_sub = True
+train_feats = pd.read_hdf('data/train_feats/train_set_feats_v4.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats_v4.h5', mode='r')
 train_cols.extend(list(train_feats.columns))
+
 # Merge
 train = pd.merge(
     train,
@@ -151,26 +153,34 @@ eval_losses = []
 bsts = []
 
 # Setup stratified CV
-num_folds = 5
+num_folds = 8
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
+
+
 for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
+
+    print('On fold ',i)
 
     # Setup fold data
     x_all = train[train_cols].values
     x_train, y_train = x_all[_train], y_tgt[_train]
     x_eval, y_eval = x_all[_eval], y_tgt[_eval]
-    #x_test = test[train_cols].values
+
+    if produce_sub:
+        x_test = test[train_cols].values
 
     # Setup multiclass LGBM
     bst = lgb.LGBMClassifier(
         boosting_type='gbdt',
-        num_leaves=6,
+        num_leaves=4,
         learning_rate=0.03,
         n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
-        silent=True,
+        reg_alpha=0.01,
+        reg_lambda=0.01,
+        silent=False,
     )
 
     # Train bst
@@ -191,7 +201,8 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bsts.append(bst)
 
     # Build test predictions
-    #y_test += bst.predict_proba(x_test) / num_folds
+    if produce_sub:
+        y_test += bst.predict_proba(x_test) / num_folds
 
     # Importance analysis
     imp_df = pd.DataFrame()
@@ -200,8 +211,9 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     imp_df['fold'] = i
     importances = pd.concat([importances, imp_df], axis=0, sort=False)
 
-print('Mean plasticc metric across folds : ', np.mean(eval_losses))
+print('Remote CV results : ')
+print(pd.Series(eval_losses).describe())
 save_importances(importances)
 
-#save_submission(y_test, f'./subs/sub_{np.mean(eval_losses):.4f}.csv')
-#
+if produce_sub:
+    save_submission(y_test, f'./subs/sub_{np.mean(eval_losses):.4f}.csv')

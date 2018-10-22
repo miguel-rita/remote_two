@@ -5,7 +5,7 @@ Solve system of non-linear equations to determine class 99 frequencies after pro
 import numpy as np
 from scipy.optimize import fsolve
 
-# Class 99 galactic bin probing probability
+# Standard binary bin probing probabilities
 P = [
     0.1,
     0.3,
@@ -13,13 +13,31 @@ P = [
     0.7,
 ]
 
-# Class 99 galactic bin probe results
-L = [
-    28.931,
-    28.893,
-    28.898,
-    28.933,
+# List of pair probes
+pairs = [
+    (99, 90),
+    (95, 92),
+    (88, 67),
+    (65, 64),
+    (62, 53),
+    (52, 42),
+    (52, 42),
+    (16, 15),
+    (99, 6),
 ]
+
+# Pair galactic bin probe results
+L = {
+    (99, 90) : [28.931, 28.893, 28.898, 28.933],
+    (95, 92) : [],
+    (88, 67) : [],
+    (65, 64) : [],
+    (62, 53) : [],
+    (52, 42) : [],
+    (52, 42) : [],
+    (16, 15) : [],
+    (99, 6) : [],
+}
 
 # Class weights
 class_weights_dict = {
