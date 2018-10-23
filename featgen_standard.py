@@ -10,12 +10,12 @@ def compute_subchunk_feats(sub_ck):
 
     sub_chunk_feats = pd.pivot_table(
         data=sub_ck,
-        values=['flux', 'flux_err'],  # , 'mjd'],
+        values=['flux',],# 'flux_err'],  # , 'mjd'],
         index=['object_id'],
         columns=['passband'],
         aggfunc={
             'flux': [np.mean, np.max, np.min, np.std, kurtosis, skew],
-            'flux_err' : [np.mean],
+            #'flux_err' : [np.mean],
             #'mjd' : [np.ptp],
         }
     )
@@ -40,6 +40,8 @@ def compute_chunk_feats(ck, multiprocess = True):
 
         pool = mp.Pool(processes=mp.cpu_count())
         sub_cks_feats = pool.map(compute_subchunk_feats, sub_cks)
+        pool.close()
+        pool.join()
 
         # Gather process work together
 
@@ -67,23 +69,22 @@ def compute_feats_cpu():
     s = 'test'
     chunks_dir = '../data/' + s + '_chunks/'
     feats_dir = '../data/' + s + '_feats/'
-    feats_name = s + '_set_feats_v4.h5'
+    feats_name = s + '_set_feats_std.h5'
     chunk_names = [n for n in os.listdir(chunks_dir) if n[0]=='t']
 
     feats_df = pd.DataFrame()
 
-    for i, chunk_name in tqdm.tqdm(enumerate(chunk_names), len(chunk_names)):
+    for i, chunk_name in tqdm.tqdm(enumerate(chunk_names), total=len(chunk_names)):
 
         cst = time.time()
         print(f'>   cpu_feats : Working on chunk number {i} . . .')
 
         ck = pd.read_hdf(chunks_dir + chunk_name)
-
         chunk_feats = compute_chunk_feats(ck, multiprocess=True)
 
         feats_df = pd.concat([feats_df, chunk_feats], axis=0)
         del ck, chunk_feats
-        gc.collect()
+
         print(f'>   cpu_feats : Done with chunk {i} in {time.time()-cst:.2f} seconds')
 
     feats_df = feats_df.reset_index().sort_values('object_id').reset_index(drop=True)

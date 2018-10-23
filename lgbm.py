@@ -11,15 +11,25 @@ import utils.preprocess as utils
 train, test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
-produce_sub = True
-train_feats = pd.read_hdf('data/train_feats/train_set_feats_v4.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats_v4.h5', mode='r')
-train_cols.extend(list(train_feats.columns))
+produce_sub = False
+# train_feats = pd.read_hdf('data/training_feats/prep_cesium_feats_v2.h5', mode='r')
+train_feats_ls = pd.read_hdf('data/training_feats/train_tsfresh_baseline.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats_std.h5', mode='r')
+# train_cols.extend(list(train_feats.columns))
+train_cols.extend(list(train_feats_ls.columns))
+# for i in range(6):
+#     del train_cols[train_cols.index('flux_skew_'+str(i))]
 
 # Merge
+# train = pd.merge(
+#     train,
+#     train_feats,
+#     how='outer',
+#     on='object_id'
+# )
 train = pd.merge(
     train,
-    train_feats,
+    train_feats_ls,
     how='outer',
     on='object_id'
 )
@@ -153,14 +163,14 @@ eval_losses = []
 bsts = []
 
 # Setup stratified CV
-num_folds = 8
+num_folds = 5
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
 
 
 for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
-    print('On fold ',i)
+    print(f'>   lgbm : Computing fold number {i} . . .')
 
     # Setup fold data
     x_all = train[train_cols].values
@@ -173,14 +183,14 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     # Setup multiclass LGBM
     bst = lgb.LGBMClassifier(
         boosting_type='gbdt',
-        num_leaves=4,
+        num_leaves=7,
         learning_rate=0.03,
         n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
-        reg_alpha=0.01,
-        reg_lambda=0.01,
-        silent=False,
+        reg_alpha=0.00,
+        reg_lambda=0.00,
+        silent=True,
     )
 
     # Train bst
@@ -192,7 +202,7 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
         eval_class_weight=[class_weights],
         eval_metric=lgbm_loss_wrapper,
         early_stopping_rounds=15,
-        verbose=True,
+        verbose=False,
     )
 
     # Store oof preds, eval loss

@@ -37,15 +37,14 @@ def get_splits(oids, nsplits, consider_global_header=True):
 
     return final_splits, nrows_per_split
 
-def main():
+def main(src_str, chunk_size):
 
     # Configs
-    src_str = 'test'
     save_dir = f'../data/{src_str}_chunks/'
     chunk_name = f'{src_str}_set_chunk'
-    source_csv = f'../data/{src_str}_set.csv'
+    comp = '.zip' if src_str == 'test' else ''
+    source_csv = f'../data/{src_str}_set.csv' + comp
 
-    chunk_size = 45000000
     print('>    file_chunker : Reading total file size . . .')
 
     # # Small file solution
@@ -129,4 +128,4 @@ def main():
     # assert np.array_equal(fulldf.values, fulldf2.values)
 
 if __name__ == '__main__':
-    main()
+    main('test', chunk_size=5000000)
