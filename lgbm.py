@@ -12,24 +12,17 @@ train, test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
 produce_sub = False
-# train_feats = pd.read_hdf('data/training_feats/prep_cesium_feats_v2.h5', mode='r')
-train_feats_ls = pd.read_hdf('data/training_feats/train_tsfresh_baseline.h5', mode='r')
+train_feats = pd.read_hdf('data/training_feats/prep_cesium_feats_v2.h5', mode='r')
 test_feats = pd.read_hdf('data/test_feats/test_set_feats_std.h5', mode='r')
 # train_cols.extend(list(train_feats.columns))
-train_cols.extend(list(train_feats_ls.columns))
+train_cols.extend(list(train_feats.columns))
 # for i in range(6):
 #     del train_cols[train_cols.index('flux_skew_'+str(i))]
 
 # Merge
-# train = pd.merge(
-#     train,
-#     train_feats,
-#     how='outer',
-#     on='object_id'
-# )
 train = pd.merge(
     train,
-    train_feats_ls,
+    train_feats,
     how='outer',
     on='object_id'
 )
