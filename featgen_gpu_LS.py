@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import cuvarbase.lombscargle as gls
-from utils.utils import load_lightcurves_from_path
+from utils.misc_utils import load_lightcurves_from_path
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import os, time

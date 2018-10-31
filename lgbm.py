@@ -9,13 +9,55 @@ import utils.preprocess as utils
 
 # Get metadata
 train, test, y_tgt, train_cols = utils.prep_data()
+# train_cols = ['hostgal_photoz', 'ddf', 'ra', 'decl', 'gal_l', 'gal_b']
 
 # Get data
 produce_sub = False
-train_feats = pd.read_hdf('data/training_feats/prep_cesium_feats_v2.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats_std.h5', mode='r')
-# train_cols.extend(list(train_feats.columns))
-train_cols.extend(list(train_feats.columns))
+#train_feats = pd.read_hdf('data/training_feats/cesium_full_feats.h5', mode='r')
+train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_one.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats_first.h5', mode='r')
+
+all_feats = list(train_feats.columns)
+feats_to_keep = [
+    'amplitude',
+    # 'flux_percentile_ratio_mid20',
+    # 'flux_percentile_ratio_mid35',
+    # 'flux_percentile_ratio_mid50',
+    # 'flux_percentile_ratio_mid65',
+    # 'flux_percentile_ratio_mid80',
+    'max_slope',
+    'maximum',
+    'median',
+    'median_absolute_deviation',
+    'minimum',
+    # 'percent_amplitude',
+    # 'percent_beyond_1_std',
+    # 'percent_close_to_median',
+    # 'percent_difference_flux_percentile',
+    'period_fast',
+    'qso_log_chi2_qsonu',
+    'qso_log_chi2nuNULL_chi2nu',
+    'skew',
+    #'std',
+    'stetson_j',
+    'stetson_k',
+    'weighted_average',
+    # 'mean',
+    # 'freq1_amplitude1',
+    # 'freq1_freq',
+    # 'freq_amplitude_ratio_21',
+    # 'linear_trend',
+]
+
+# selected_feats = []
+# for f in all_feats:
+#     if np.sum([((sf in f[:len(sf)]) and (len(f) == len(sf)+2)) for sf in feats_to_keep]) > 0:
+#             selected_feats.append(f)
+#
+# train_cols.extend(selected_feats)
+
+train_cols.extend(all_feats)
+
 # for i in range(6):
 #     del train_cols[train_cols.index('flux_skew_'+str(i))]
 
@@ -118,7 +160,7 @@ def save_importances(imps_):
     plt.tight_layout()
     plt.savefig('imps.png')
 
-def save_submission(y_test, sub_name, nrows=None):
+def save_submission(y_test, sub_name, rs_bins, nrows=None):
 
     # Get submission header
     col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
@@ -128,10 +170,17 @@ def save_submission(y_test, sub_name, nrows=None):
     object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows, usecols=['object_id']).values.astype(int)
     num_ids = object_ids.size
 
-    # Naive sub
-    obj_99_prob = np.ones((num_ids, 1)) * 1/10
-    factor = 1-1/10
-    sub = np.hstack([object_ids, y_test*factor, obj_99_prob])
+    # Class 99 adjustment - remember these are conditional probs on redshift
+    c99_bin0_prob = 0.021019
+    c99_bin1_9_prob = 0.102627
+
+    c99_probs = np.zeros((y_test.shape[0],1))
+    c99_probs[rs_bins==0] = c99_bin0_prob
+    c99_probs[rs_bins!=0] = c99_bin1_9_prob
+    y_test[rs_bins==0] *= (1 - c99_bin0_prob)
+    y_test[rs_bins!=0] *= (1 - c99_bin1_9_prob)
+
+    sub = np.hstack([object_ids, y_test, c99_probs])
 
     h = ''
     for s in col_names:
@@ -142,7 +191,7 @@ def save_submission(y_test, sub_name, nrows=None):
     np.savetxt(
         fname=sub_name,
         X=sub,
-        fmt=['%d'] + ['%.3f'] * num_classes,
+        fmt=['%d'] + ['%.6f'] * num_classes,
         delimiter=',',
         header=h,
         comments='',
@@ -177,7 +226,7 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bst = lgb.LGBMClassifier(
         boosting_type='gbdt',
         num_leaves=7,
-        learning_rate=0.03,
+        learning_rate=0.05,
         n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
@@ -219,4 +268,4 @@ print(pd.Series(eval_losses).describe())
 save_importances(importances)
 
 if produce_sub:
-    save_submission(y_test, f'./subs/sub_{np.mean(eval_losses):.4f}.csv')
+    save_submission(y_test, f'./subs/sub_const99_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)

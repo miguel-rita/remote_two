@@ -66,10 +66,10 @@ def compute_feats_cpu():
     print(f'>   cpu_feats : Started . . .')
 
     # Get existing chunk names
-    s = 'test'
-    chunks_dir = '../data/' + s + '_chunks/'
-    feats_dir = '../data/' + s + '_feats/'
-    feats_name = s + '_set_feats_std.h5'
+    s = 'training'
+    chunks_dir = 'data/' + s + '_chunks/'
+    feats_dir = 'data/' + s + '_feats/'
+    feats_name = s + '_set_feats_first.h5'
     chunk_names = [n for n in os.listdir(chunks_dir) if n[0]=='t']
 
     feats_df = pd.DataFrame()

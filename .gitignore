@@ -14,11 +14,17 @@ data/training_feats/*
 !data/training_feats/.dir.txt
 data/training_group_lcs/*
 !data/training_group_lcs/.dir.txt
+data/training_cesium_curves/*
+!data/training_cesium_curves/.dir.txt
+data/test_cesium_curves/*
+!data/test_cesium_curves/.dir.txt
 
 subs/*
 !subs/.dir.txt
 subs_freq_probe/*
 !subs_freq_probe/.dir.txt
+subs_rs_probe/*
+!subs_rs_probe/.dir.txt
 
 utils/__py*
 .ipynb*
