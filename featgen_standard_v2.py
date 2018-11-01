@@ -151,7 +151,7 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
 
     # Get paths to lcs and respective oids
     atomic_args = []
-    for lcs_path, oids_path in zip(glob.glob(light_curves_dir + '/*.pkl'), glob.glob(light_curves_dir + '/*.npy')):
+    for lcs_path, oids_path in zip(sorted(glob.glob(light_curves_dir + '/*.pkl')), sorted(glob.glob(light_curves_dir + '/*.npy'))):
         atomic_args.append((lcs_path, oids_path))
 
 
@@ -178,13 +178,13 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
     df.reset_index(drop=True).to_hdf(save_dir+'/'+save_name, key='w')
 
 
-set_str = 'test'
+set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
     save_name=set_str+'_set_feats_first_from_grouped_plus_detected_three.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
-    n_batches=8,
+    n_batches=2,
 )
 print(f'>   featgen_standard_v2 : Wall time : {(time.time()-st):.2f} seconds')
 

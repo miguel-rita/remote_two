@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import tqdm
 import multiprocessing as mp
-import os, pickle
+import os, pickle, gc
 
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):
     '''
@@ -88,7 +88,7 @@ def store_chunk_lightcurves_cesium(chunk, save_dir, save_name):
 
         series_oid_group = []
 
-        for oid in tqdm.tqdm(uoids):
+        for oid in uoids:
 
             pbs = []
 
@@ -102,12 +102,16 @@ def store_chunk_lightcurves_cesium(chunk, save_dir, save_name):
 
         final_list.append(series_oid_group)
 
+
     # Save oids
     np.save(save_dir + '/' + save_name + '_oids.npy', uoids)
 
     # Save lightcurves
     with open(save_dir + '/' + save_name + '_lcs.pkl', 'wb') as handle:
         pickle.dump(final_list, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    del chunk, df_gb, uoids, passbands, final_list
+    gc.collect()
 
 def store_chunk_lightcurves_from_path(chunk_path, save_dir, save_name):
     '''
@@ -124,6 +128,9 @@ def store_chunk_lightcurves_from_path(chunk_path, save_dir, save_name):
 
     # Store curves
     store_chunk_lightcurves_cesium(chunk=df, save_dir=save_dir, save_name=save_name)
+
+    del df
+    gc.collect()
 
 def load_lightcurves_from_path(full_dir_to_file):
     '''
@@ -175,5 +182,5 @@ set_name = 'test'
 convert_chunks_to_lc_chunks(
     chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
     save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
-    n_batches=3,
+    n_batches=4,
 )
