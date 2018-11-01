@@ -35,7 +35,7 @@ def atomic_worker(args):
     )
 
     # Compute 'm' (flux) feats
-    for i,oid_curves in tqdm.tqdm(enumerate(lcs[1]), total=len(lcs[1]), postfix=' flux feats'):
+    for i,oid_curves in enumerate(lcs[1]):
         for j,f in enumerate(feats_to_compute):
             for k,band in enumerate(oid_curves):
                 m_array[i,j*num_bands+k] = f(band)
@@ -112,7 +112,7 @@ def atomic_worker(args):
 
 
     # Compute 't' (mjd)-related feats
-    for i,(oid_t_curves, oid_d_curves) in tqdm.tqdm(enumerate(zip(lcs[0], lcs[3])), len(lcs[0]), postfix=' mjd feats'):
+    for i,(oid_t_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[3])):
         for j,f in enumerate(feats_to_compute):
             t_array[i,:] = f(oid_t_curves, oid_d_curves)
 
