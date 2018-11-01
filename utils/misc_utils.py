@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import tqdm
 import multiprocessing as mp
-import os, pickle
+import os, pickle, gc
 
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):
     '''
@@ -76,7 +76,6 @@ def store_chunk_lightcurves_cesium(chunk, save_dir, save_name):
         'detected': np.uint8,
     }
     chunk = chunk.astype(dtypes)
-
     df_gb = chunk.groupby(['object_id', 'passband'])
     uoids = chunk['object_id'].unique()
     passbands = range(6)
@@ -102,12 +101,16 @@ def store_chunk_lightcurves_cesium(chunk, save_dir, save_name):
 
         final_list.append(series_oid_group)
 
+
     # Save oids
     np.save(save_dir + '/' + save_name + '_oids.npy', uoids)
 
     # Save lightcurves
     with open(save_dir + '/' + save_name + '_lcs.pkl', 'wb') as handle:
         pickle.dump(final_list, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    del chunk, df_gb, uoids, passbands, final_list
+    gc.collect()
 
 def store_chunk_lightcurves_from_path(chunk_path, save_dir, save_name):
     '''
@@ -124,6 +127,9 @@ def store_chunk_lightcurves_from_path(chunk_path, save_dir, save_name):
 
     # Store curves
     store_chunk_lightcurves_cesium(chunk=df, save_dir=save_dir, save_name=save_name)
+
+    del df
+    gc.collect()
 
 def load_lightcurves_from_path(full_dir_to_file):
     '''
@@ -171,7 +177,7 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
         pool.join()
 
 convert_chunks_to_lc_chunks(
-    chunks_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/training_chunks',
-    save_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/training_cesium_curves',
-    n_batches=1,
+    chunks_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/test_chunks',
+    save_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/test_cesium_curves',
+    n_batches=8,
 )

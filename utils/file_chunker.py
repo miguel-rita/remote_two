@@ -128,4 +128,4 @@ def main(src_str, chunk_size):
     # assert np.array_equal(fulldf.values, fulldf2.values)
 
 if __name__ == '__main__':
-    main('test', chunk_size=np.ceil(453653104/32))
+    main('test', chunk_size=np.ceil(453653104/64))

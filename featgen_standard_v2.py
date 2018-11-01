@@ -35,7 +35,7 @@ def atomic_worker(args):
     )
 
     # Compute 'm' (flux) feats
-    for i,oid_curves in enumerate(lcs[1]):
+    for i,oid_curves in tqdm.tqdm(enumerate(lcs[1]), total=len(lcs[1]), postfix=' flux feats'):
         for j,f in enumerate(feats_to_compute):
             for k,band in enumerate(oid_curves):
                 m_array[i,j*num_bands+k] = f(band)
@@ -43,34 +43,78 @@ def atomic_worker(args):
     '''
     t-related feats (mjd)
     '''
-
-    # Define feats to compute
-    def detect_amplitude(ts, ds):
-        '''
-        Compute max detected span across passbands 
-        '''
-        detected_stamps = []
-        for t, d in zip(ts, ds):
-            d = d.astype(np.bool)
-            if np.any(d):
-                t = t[d]
-                detected_stamps.extend([t[0], t[-1]])
-        return np.max(detected_stamps) - np.min(detected_stamps)
-
-
-    feats_to_compute = [detect_amplitude]
-
-    feat_names.extend(['detected_amplitude'])
+    num_feats = 3
 
     # Allocate numpy placeholder for computed feats
     t_array = np.zeros(
-        shape=(oids.size, 1)
+        shape=(oids.size, num_feats)
     )
 
+    # Define feats to compute
+    def detected_feats(ts, ds):
+        '''
+        Compute several detected-related feats:
+            1) Max 1's amplitude
+            2) Num. 1 blocks
+            3) Avg. 1 block duration
+        '''
+
+        # Get all bands info in a single matrix
+        td_matrix = np.vstack([np.hstack(ts), np.hstack(ds)]).T
+
+        # Sort by mjd
+        td_matrix = td_matrix[td_matrix[:, 0].argsort()]
+
+        # Compute mjd groups
+        prev_detected = False
+        mjd_groups = []  # Final var holding all collect groups
+        curr_group = []  # Temp var to collect group info in loop
+
+        for line in td_matrix:
+            mjd, detected = line[0], bool(line[1])
+            if prev_detected and not detected:
+                # Just finished group
+                mjd_groups.append(curr_group)
+                curr_group = []
+                prev_detected = False
+            if detected:
+                # Going through/starting group
+                curr_group.append(mjd)
+                prev_detected = True
+
+        # Append last group
+        if curr_group:
+            mjd_groups.append(curr_group)
+
+        # Compute feats
+
+        # Amplitude
+        amp = mjd_groups[-1][-1] - mjd_groups[0][0]
+        # Num. of groups (1-blocks)
+        n_gps = len(mjd_groups)
+        # Average group duration
+        mean_gp = np.mean([g[-1] - g[0] for g in mjd_groups])
+
+        return np.array([
+            amp,
+            n_gps,
+            mean_gp,
+        ])
+
+
+    feats_to_compute = [detected_feats]
+
+    feat_names.extend([
+        'det_amplitude',
+        'det_n_1_blocks',
+        'det_avg_1_block_duration'
+    ])
+
+
     # Compute 't' (mjd)-related feats
-    for i,(oid_t_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[3])):
+    for i,(oid_t_curves, oid_d_curves) in tqdm.tqdm(enumerate(zip(lcs[0], lcs[3])), len(lcs[0]), postfix=' mjd feats'):
         for j,f in enumerate(feats_to_compute):
-            t_array[i,0] = f(oid_t_curves, oid_d_curves)
+            t_array[i,:] = f(oid_t_curves, oid_d_curves)
 
     '''
     Agg feats and wrap up
@@ -134,13 +178,24 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
     df.reset_index(drop=True).to_hdf(save_dir+'/'+save_name, key='w')
 
 
-set_str = 'training'
+set_str = 'test'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_first_from_grouped_plus_detected_one.h5',
+    save_name=set_str+'_set_feats_first_from_grouped_plus_detected_three.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
-    n_batches=1,
+    n_batches=8,
 )
 print(f'>   featgen_standard_v2 : Wall time : {(time.time()-st):.2f} seconds')
 
+# Featgen test
+# print(detected_feats(
+#     ts=[
+#         [0,1,2,7,8,9],
+#         [4,5,6,100,105,106,200],
+#     ],
+#     ds=[
+#         [0,1,1,1,1,0],
+#         [0,1,1,0,1,1,1],
+#     ],
+# ))

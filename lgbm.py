@@ -14,10 +14,10 @@ train, test, y_tgt, train_cols = utils.prep_data()
 # Get data
 produce_sub = False
 #train_feats = pd.read_hdf('data/training_feats/cesium_full_feats.h5', mode='r')
-train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_one.h5', mode='r')
+train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
 test_feats = pd.read_hdf('data/test_feats/test_set_feats_first.h5', mode='r')
 
-all_feats = list(train_feats.columns)
+all_feats = list(train_feats.columns)[1:] # Jump o_id
 feats_to_keep = [
     'amplitude',
     # 'flux_percentile_ratio_mid20',
