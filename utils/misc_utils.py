@@ -88,7 +88,7 @@ def store_chunk_lightcurves_cesium(chunk, save_dir, save_name):
 
         series_oid_group = []
 
-        for oid in uoids:
+        for oid in tqdm.tqdm(uoids):
 
             pbs = []
 
@@ -170,8 +170,10 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
         pool.close()
         pool.join()
 
+os.chdir('..')
+set_name = 'test'
 convert_chunks_to_lc_chunks(
-    chunks_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/training_chunks',
-    save_dir='/Users/miguelrita/Documents/Kaggle/remote_two/data/training_cesium_curves',
-    n_batches=1,
+    chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
+    save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
+    n_batches=3,
 )

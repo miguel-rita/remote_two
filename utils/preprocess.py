@@ -17,15 +17,6 @@ def prep_data():
     train = pd.read_csv(os.getcwd() + '/' + 'data/training_set_metadata.csv')
     test = pd.read_csv(os.getcwd() + '/' + 'data/test_set_metadata.csv')
 
-    # Check overall info
-    print(train.columns, train.shape)
-    print(test.columns, test.shape)
-
-    # Check for NAs in metadata
-    print('Num. of NAs:')
-    print(train.isna().sum())
-    print(test.isna().sum())
-
     # Remove spectrometry redshift, distmod feats from both sets
     feats_to_delete = ['hostgal_specz', 'distmod']
     train.drop(feats_to_delete, axis=1, inplace=True)
@@ -52,13 +43,6 @@ def prep_data():
                 return i+1 # +1 to jump galactic bin
     train.loc[train['hostgal_photoz']>0, ['rs_bin']] = train['hostgal_photoz'].loc[train['hostgal_photoz']>0].apply(enc)
 
-    # Check feat was created
-    print(train.columns, train.shape)
-    print(test.columns, test.shape)
-
-    # Check class freqs.
-    print(train.groupby('target')['object_id'].count())
-
     # Get targets
     y_tgt = train['target'].values
     train.drop(['target'], axis=1, inplace=True)
@@ -67,4 +51,4 @@ def prep_data():
     train_cols = list(train.columns)
     [train_cols.remove(c) for c in ['object_id', 'rs_bin']]
 
-    return (train, test, y_tgt, train_cols)
+    return train, test, y_tgt, train_cols

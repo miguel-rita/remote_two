@@ -142,19 +142,20 @@ approx_freqs = {
 }
 
 # Load submission
-sub = pd.read_csv('subs/sub_const99_1.0656.csv').values
+sub = pd.read_csv('subs/sub_nn_const99_0.9355.csv').values
 
 # Load rs_bin info
 rs_bins = np.load('data/rs_bins.npy')
 
 prior_table = build_prior_table(approx_freqs)
 sub_table = build_sub_table(sub, rs_bins)
+print(prior_table, sub_table)
 shifted_sub = migrate_sub(prior_table, sub_table, sub, rs_bins)
 
 # Save shifted sub
 
 # Get submission header
-col_names = list(pd.read_csv(filepath_or_buffer='../data/sample_submission.csv', nrows=1).columns)
+col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
 num_classes = len(col_names) - 1
 
 h = ''
@@ -163,7 +164,7 @@ for s in col_names:
 h = h[:-1]
 
 np.savetxt(
-    fname='subs/exp_ii_sub_1.0656.csv',
+    fname='subs/sub_nn_const99_0.9355_post.csv',
     X=shifted_sub,
     fmt=['%d'] + ['%.4f'] * num_classes,
     delimiter=',',

@@ -26,6 +26,9 @@ subs_freq_probe/*
 subs_rs_probe/*
 !subs_rs_probe/.dir.txt
 
+models/*
+!models/.dir.txt
+
 utils/__py*
 .ipynb*
 .DS_Store
