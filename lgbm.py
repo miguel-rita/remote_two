@@ -5,6 +5,7 @@ import lightgbm as lgb
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import StratifiedKFold
+from sklearn.utils.class_weight import compute_sample_weight
 import utils.preprocess as utils
 
 # Get metadata
@@ -12,10 +13,10 @@ train, test, y_tgt, train_cols = utils.prep_data()
 # train_cols = ['hostgal_photoz', 'ddf', 'ra', 'decl', 'gal_l', 'gal_b']
 
 # Get data
-produce_sub = False
+produce_sub = True
 #train_feats = pd.read_hdf('data/training_feats/cesium_full_feats.h5', mode='r')
 train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats_first.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
 
 all_feats = list(train_feats.columns)[1:] # Jump o_id
 feats_to_keep = [
@@ -208,7 +209,8 @@ bsts = []
 num_folds = 5
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
-
+# Compute sample weights
+sample_weights = compute_sample_weight(class_weights_dict, y_tgt)
 
 for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
@@ -218,6 +220,7 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     x_all = train[train_cols].values
     x_train, y_train = x_all[_train], y_tgt[_train]
     x_eval, y_eval = x_all[_eval], y_tgt[_eval]
+    sample_weights_train, sample_weights_eval = sample_weights[_train], sample_weights[_eval]
 
     if produce_sub:
         x_test = test[train_cols].values
@@ -239,6 +242,8 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bst.fit(
         X=x_train,
         y=y_train,
+        sample_weight=list(sample_weights_train),
+        eval_sample_weight=list(sample_weights_eval),
         eval_set=[(x_eval, y_eval)],
         eval_names=['\neval_set'],
         eval_class_weight=[class_weights],
@@ -268,4 +273,4 @@ print(pd.Series(eval_losses).describe())
 save_importances(importances)
 
 if produce_sub:
-    save_submission(y_test, f'./subs/sub_const99_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
+    save_submission(y_test, f'./subs/sub_sample_weight_new3feats_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)

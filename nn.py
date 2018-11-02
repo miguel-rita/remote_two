@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-import time, datetime, os
+import time, datetime, os, tqdm
 
 from keras.models import Sequential
 from keras.layers import Dense, BatchNormalization, Dropout
@@ -20,9 +20,9 @@ train_meta, test_meta, y_tgt, train_cols = utils.prep_data()
 
 # Get data and concat to metadata
 train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats_std.h5', mode='r')
+test_feats = pd.read_hdf('data/test_feats/test_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
 
-make_sub = False
+make_sub = True
 
 train_cols.extend(list(train_feats.iloc[:,1:].columns)) # Jump object_id
 
@@ -177,7 +177,7 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
     # Fit overall definitions
     batch_size = 512
-    num_epochs = 100000
+    num_epochs = 10000
 
     hist = nn.fit(
         x=x_train,
@@ -272,8 +272,8 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
 # Make sub by averaging preds from all fold models
 if make_sub:
     y_preds = []
-    for nn in nns:
-        y_preds.append(nn.predict(x_test, batch_size=int(x_test.shape[0]/5)))
+    for nn in tqdm.tqdm(nns, total=len(nns)):
+        y_preds.append(nn.predict(x_test, batch_size=int(x_test.shape[0]/500)))
     y_sub = np.mean(y_preds, axis=0)
 
     print(f'>   nn : Saving sub . . .')

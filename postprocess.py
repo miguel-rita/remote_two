@@ -43,8 +43,7 @@ def migrate_sub(prior_table_, sub_table_, sub__, rs_bins_):
 
     # For each submission row . . .
     for i, (sub_line, mm_line) in tqdm.tqdm(enumerate(zip(sub_[:,1:-1], migration_matrix)), total=sub_.shape[0]):
-        if i==7:
-            print(1)
+
         # Get positive col indexes - classes where probs need to go down
         pos_cols = np.where(mm_line > 0)[0]
 
@@ -142,14 +141,17 @@ approx_freqs = {
 }
 
 # Load submission
-sub = pd.read_csv('subs/sub_nn_const99_0.9355.csv').values
+sub = pd.read_csv('subs/sub_nn_const99_0.8928.csv').values
 
 # Load rs_bin info
 rs_bins = np.load('data/rs_bins.npy')
 
 prior_table = build_prior_table(approx_freqs)
 sub_table = build_sub_table(sub, rs_bins)
+
+np.set_printoptions(suppress=True)
 print(prior_table, sub_table)
+
 shifted_sub = migrate_sub(prior_table, sub_table, sub, rs_bins)
 
 # Save shifted sub
@@ -164,7 +166,7 @@ for s in col_names:
 h = h[:-1]
 
 np.savetxt(
-    fname='subs/sub_nn_const99_0.9355_post.csv',
+    fname='subs/sub_nn_const99_0.8928s.csv',
     X=shifted_sub,
     fmt=['%d'] + ['%.4f'] * num_classes,
     delimiter=',',
