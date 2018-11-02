@@ -17,6 +17,9 @@ def atomic_worker(args):
         lcs = pickle.load(f)
     oids = np.load(oids_dir).astype(np.uint32)
 
+
+
+
     '''
     m-feats (flux)
     '''
@@ -24,7 +27,7 @@ def atomic_worker(args):
     # Define feats to compute
     feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
     num_bands = 6
-    func_names = ['mean', 'max', 'min', 'std', 'skew', 'kurt']
+    func_names = ['flux_'+n for n in ['mean', 'max', 'min', 'std', 'skew', 'kurt']]
     feat_names = []
     for fn in func_names:
         feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
@@ -41,7 +44,33 @@ def atomic_worker(args):
                 m_array[i,j*num_bands+k] = f(band)
 
     '''
-    t-related feats (mjd)
+    m-feats (filtered flux) - for now empty bands
+    '''
+
+    # Define feats to compute
+    feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
+    num_bands = 6
+
+    func_names = [f'is_band_{i:d}' for i in range(num_bands)]
+    feat_names.extend(func_names)
+
+    # Allocate numpy placeholder for computed feats
+    m2_array = np.zeros(
+        shape=(oids.size, num_bands)
+    )
+
+    # Compute 'm' (flux) feats
+    for i, (oid_curves, detect_curves) in enumerate(zip(lcs[1], lcs[3])):
+        for k, (band, dband) in enumerate(zip(oid_curves, detect_curves)):
+            detections = dband.astype(bool)
+            if not np.any(detections):
+                m_array[i, k] = 0
+            else:
+                m_array[i, k] = 1
+
+
+    '''
+    td-related feats (mjd, detected)
     '''
     num_feats = 3
 
@@ -53,7 +82,7 @@ def atomic_worker(args):
     # Define feats to compute
     def detected_feats(ts, ds):
         '''
-        Compute several detected-related feats:
+        Compute several detected-related feats on aggregated channels:
             1) Max 1's amplitude
             2) Num. 1 blocks
             3) Avg. 1 block duration
@@ -107,21 +136,52 @@ def atomic_worker(args):
     feat_names.extend([
         'det_amplitude',
         'det_n_1_blocks',
-        'det_avg_1_block_duration'
+        'det_avg_1_block_duration',
+
     ])
 
 
-    # Compute 't' (mjd)-related feats
+    # Compute 'td' (mjd/detected)-related feats
     for i,(oid_t_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[3])):
         for j,f in enumerate(feats_to_compute):
             t_array[i,:] = f(oid_t_curves, oid_d_curves)
+
+
+
+
+    '''
+    Simple d feats
+    '''
+
+    # Define feats to compute
+    feats_to_compute = [np.mean, np.std, skew]
+    num_bands = 6
+    func_names = ['detected_'+n for n in ['mean', 'std', 'skew']]
+
+    for fn in func_names:
+        feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
+    # Allocate numpy placeholder for computed feats
+    d_array = np.zeros(
+        shape=(oids.size, num_bands * len(func_names))
+    )
+
+    # Compute 'd' (detected) feats
+    for i, oid_curves in enumerate(lcs[3]):
+        for j, f in enumerate(feats_to_compute):
+            for k, band in enumerate(oid_curves):
+                d_array[i, j * num_bands + k] = f(band)
+
+
+
+
 
     '''
     Agg feats and wrap up
     '''
 
     # Stack oids to feat results
-    df_array = np.hstack([np.expand_dims(oids, 1), m_array, t_array])
+    df_array = np.hstack([np.expand_dims(oids, 1), m_array, t_array, d_array, m2_array])
 
     # Build final pandas dataframe
     df = pd.DataFrame(
@@ -182,9 +242,9 @@ set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_first_from_grouped_plus_detected_three.h5',
+    save_name=set_str+'_set_feats_v3_isband.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
-    n_batches=2,
+    n_batches=1,
 )
 print(f'>   featgen_standard_v2 : Wall time : {(time.time()-st):.2f} seconds')
 

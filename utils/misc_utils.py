@@ -172,7 +172,7 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
     # Dispatch work to processes, one batch at a time
 
     for ixs in tqdm.tqdm(batch_split_indexes, total=len(batch_split_indexes), postfix='Batch'):
-        pool = mp.Pool(processes=mp.cpu_count())
+        pool = mp.Pool(processes=4)
         pool.map(atomic_worker, [atomic_args[ix] for ix in ixs])
         pool.close()
         pool.join()
@@ -182,5 +182,5 @@ set_name = 'test'
 convert_chunks_to_lc_chunks(
     chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
     save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
-    n_batches=4,
+    n_batches=9,
 )

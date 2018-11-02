@@ -1,110 +1,43 @@
+import os, time, tqdm, itertools
+from functools import reduce
+
 import pandas as pd
 import numpy as np
-import os, time, tqdm
-import lightgbm as lgb
 import seaborn as sns
 import matplotlib.pyplot as plt
+
+import lightgbm as lgb
+
 from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_sample_weight
+from sklearn.metrics import confusion_matrix
+
 import utils.preprocess as utils
 
-# Get metadata
-train, test, y_tgt, train_cols = utils.prep_data()
-# train_cols = ['hostgal_photoz', 'ddf', 'ra', 'decl', 'gal_l', 'gal_b']
 
-# Get data
-produce_sub = True
-#train_feats = pd.read_hdf('data/training_feats/cesium_full_feats.h5', mode='r')
-train_feats = pd.read_hdf('data/training_feats/training_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
-test_feats = pd.read_hdf('data/test_feats/test_set_feats_first_from_grouped_plus_detected_three.h5', mode='r')
 
-all_feats = list(train_feats.columns)[1:] # Jump o_id
-feats_to_keep = [
-    'amplitude',
-    # 'flux_percentile_ratio_mid20',
-    # 'flux_percentile_ratio_mid35',
-    # 'flux_percentile_ratio_mid50',
-    # 'flux_percentile_ratio_mid65',
-    # 'flux_percentile_ratio_mid80',
-    'max_slope',
-    'maximum',
-    'median',
-    'median_absolute_deviation',
-    'minimum',
-    # 'percent_amplitude',
-    # 'percent_beyond_1_std',
-    # 'percent_close_to_median',
-    # 'percent_difference_flux_percentile',
-    'period_fast',
-    'qso_log_chi2_qsonu',
-    'qso_log_chi2nuNULL_chi2nu',
-    'skew',
-    #'std',
-    'stetson_j',
-    'stetson_k',
-    'weighted_average',
-    # 'mean',
-    # 'freq1_amplitude1',
-    # 'freq1_freq',
-    # 'freq_amplitude_ratio_21',
-    # 'linear_trend',
-]
+'''
+Misc. utils
+'''
 
-# selected_feats = []
-# for f in all_feats:
-#     if np.sum([((sf in f[:len(sf)]) and (len(f) == len(sf)+2)) for sf in feats_to_keep]) > 0:
-#             selected_feats.append(f)
-#
-# train_cols.extend(selected_feats)
+def concat_feats(feat_set_list, init):
+    '''
+    Reads and concatenates already computed feats to metadata
 
-train_cols.extend(all_feats)
+    :param feat_set_list:
+    :param init: initial dataframe containing meta feats
+    :return: pandas dataframe containing all specified features with first column being object id
+    '''
 
-# for i in range(6):
-#     del train_cols[train_cols.index('flux_skew_'+str(i))]
-
-# Merge
-train = pd.merge(
-    train,
-    train_feats,
-    how='outer',
-    on='object_id'
-)
-test = pd.merge(
-    test,
-    test_feats,
-    how='outer',
-    on='object_id'
-)
-
-# Get sorted class weights
-class_weights_dict = {
-    #99 : 2.002408,
-    95 : 1.001044,
-    92 : 1.001044,
-    90 : 1.001044,
-    88 : 1.001044,
-    67 : 1.001044,
-    65 : 1.001044,
-    64 : 2.007104,
-    62 : 1.001044,
-    53 : 1.000000,
-    52 : 1.001044,
-    42 : 1.001044,
-    16 : 1.001044,
-    15 : 2.001886,
-    6 : 1.001044,
-}
-class_codes = np.unique(list(class_weights_dict.keys()))
-class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
-label_encode = {c: i for i, c in enumerate(class_codes)}
-weights = np.array([class_weights[i] for i in range(len(class_weights))])
+    feat_dfs = [pd.read_hdf(path, mode='r') for path in feat_set_list]
+    return reduce(lambda l,r : pd.merge(l,r,how='outer',on='object_id'), feat_dfs, init)
 
 def lgbm_loss_wrapper(y_true, y_pred):
     '''
     Custom lgbm eval metric - multiclass weighted logloss
     :param y_true: Encoded 1D targets, needs OHE
     :param y_pred: 1D preds class-first according to lgbm doc
-    :return: 
+    :return:
     '''
 
     # Reshape preds from 1D lgb class-first format to standard 2D format
@@ -118,7 +51,7 @@ def loss_wrapper(y_true, y_pred):
     Custom eval metric, same as above only inputs are in different format
     :param y_true: Unencoded targets, 1D, needs OHE
     :param y_pred: 2D array of probabilities, summing to 1 per row (across classes)
-    :return: 
+    :return:
     '''
 
     # Encode targets
@@ -160,6 +93,7 @@ def save_importances(imps_):
     sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
     plt.tight_layout()
     plt.savefig('imps.png')
+    plt.clf()
 
 def save_submission(y_test, sub_name, rs_bins, nrows=None):
 
@@ -198,6 +132,87 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
         comments='',
     )
 
+def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    print(cm)
+
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.tight_layout()
+    plt.show()
+
+'''
+Load data
+'''
+
+# Get metadata
+meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
+
+# Get data
+train_feats_list = [
+    'data/training_feats/training_set_feats_v3_isband.h5',
+]
+test_feats_list = [
+    'data/test_feats/test_set_feats_std.h5'
+]
+train = concat_feats(train_feats_list, meta_train)
+test = concat_feats(test_feats_list, meta_test)
+train_cols.extend(list(train.columns)[1:]) # Jump object_id
+
+
+
+produce_sub = False
+
+
+
+# Get sorted class weights
+class_weights_dict = {
+    #99 : 2.002408,
+    95 : 1.001044,
+    92 : 1.001044,
+    90 : 1.001044,
+    88 : 1.001044,
+    67 : 1.001044,
+    65 : 1.001044,
+    64 : 2.007104,
+    62 : 1.001044,
+    53 : 1.000000,
+    52 : 1.001044,
+    42 : 1.001044,
+    16 : 1.001044,
+    15 : 2.001886,
+    6 : 1.001044,
+}
+class_codes = np.unique(list(class_weights_dict.keys()))
+class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
+label_encode = {c: i for i, c in enumerate(class_codes)}
+weights = np.array([class_weights[i] for i in range(len(class_weights))])
+
+
+
 # CV cycle collectors
 importances = pd.DataFrame()
 y_preds_oof = np.zeros((y_tgt.size, weights.size))
@@ -205,12 +220,18 @@ y_test = np.zeros((test.shape[0], weights.size))
 eval_losses = []
 bsts = []
 
+
+
 # Setup stratified CV
 num_folds = 5
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
+
+
 # Compute sample weights
 sample_weights = compute_sample_weight(class_weights_dict, y_tgt)
+
+
 
 for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
@@ -242,8 +263,8 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bst.fit(
         X=x_train,
         y=y_train,
-        sample_weight=list(sample_weights_train),
-        eval_sample_weight=list(sample_weights_eval),
+        #sample_weight=list(sample_weights_train),
+        #eval_sample_weight=list(sample_weights_eval),
         eval_set=[(x_eval, y_eval)],
         eval_names=['\neval_set'],
         eval_class_weight=[class_weights],
@@ -271,6 +292,12 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 print('Remote CV results : ')
 print(pd.Series(eval_losses).describe())
 save_importances(importances)
+
+# Plot confusion matrix
+y_preds = np.argmax(y_preds_oof, axis=1)
+y_preds = np.array([class_codes[i] for i in y_preds])
+cm = confusion_matrix(y_tgt, y_preds)
+plot_confusion_matrix(cm, classes=[str(c) for c in class_codes])
 
 if produce_sub:
     save_submission(y_test, f'./subs/sub_sample_weight_new3feats_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
