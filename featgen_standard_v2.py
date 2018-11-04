@@ -8,6 +8,7 @@ import pandas as pd
 import multiprocessing as mp
 import tqdm, glob, time, gc, pickle
 from scipy.stats import kurtosis, skew
+import cesium.time_series, cesium.featurize
 
 def atomic_worker(args):
 
@@ -20,160 +21,269 @@ def atomic_worker(args):
 
 
 
+    # Feat computation controls
+    feat_names = []
+    feat_arrays = []
+    compute_feats = {
+        'm-feats'            : False,
+        'm-feats-filtered'   : True,
+        't-feats'            : False,
+        'd-feats'            : False,
+        'cesium-feats'       : False,
+        'slope-feats'        : False,
+    }
+
+
+
+
     '''
     m-feats (flux)
     '''
+    if compute_feats['m-feats']:
 
-    # Define feats to compute
-    feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
-    num_bands = 6
-    func_names = ['flux_'+n for n in ['mean', 'max', 'min', 'std', 'skew', 'kurt']]
-    feat_names = []
-    for fn in func_names:
-        feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+        # Define feats to compute
+        feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
+        num_bands = 6
+        func_names = ['flux_'+n for n in ['mean', 'max', 'min', 'std', 'skew', 'kurt']]
+        for fn in func_names:
+            feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
-    # Allocate numpy placeholder for computed feats
-    m_array = np.zeros(
-        shape=(oids.size, len(feat_names))
-    )
+        # Allocate numpy placeholder for computed feats
+        m_array = np.zeros(
+            shape=(oids.size, len(feat_names))
+        )
 
-    # Compute 'm' (flux) feats
-    for i,oid_curves in enumerate(lcs[1]):
-        for j,f in enumerate(feats_to_compute):
-            for k,band in enumerate(oid_curves):
-                m_array[i,j*num_bands+k] = f(band)
+        # Compute 'm' (flux) feats
+        for i,oid_curves in enumerate(lcs[1]):
+            for j,f in enumerate(feats_to_compute):
+                for k,band in enumerate(oid_curves):
+                    m_array[i,j*num_bands+k] = f(band)
+
+        feat_arrays.append(m_array)
+
+    '''
+    slope feats
+    '''
+    if compute_feats['slope-feats']:
+
+        def slope_feats(ts, ms, ds):
+            '''
+            Custom compute of slope feats. Atm:
+            1) Max slope per band
+            '''
+
+            if np.sum(ds) <= 1: # 0 or 1 detected points are insufficient for slope computation
+                return 0
+
+            # Unused
+            mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
+
+            s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
+
+            return np.max(s)
+
+
+        # Define feats to compute
+        feats_to_compute = [slope_feats]
+        num_bands = 6
+        local_names = []
+        for fn in ['slope_max']:
+            local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
+        feat_names.extend(local_names)
+
+        # Allocate numpy placeholder for computed feats
+        s_array = np.zeros(
+            shape=(oids.size, len(local_names))
+        )
+
+        # Compute slope feats
+        for i, (t_curves, m_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
+            for j, f in enumerate(feats_to_compute):
+                for k, (ts, ms, ds) in enumerate(zip(t_curves, m_curves, d_curves)):
+                    s_array[i, j * num_bands + k] = f(ts, ms, ds)
+
+        feat_arrays.append(s_array)
+
+
 
     '''
     m-feats (filtered flux) - for now empty bands
     '''
+    if compute_feats['m-feats-filtered']:
 
-    # Define feats to compute
-    feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
-    num_bands = 6
+        # Define feats to compute
+        feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
+        num_bands = 6
 
-    func_names = [f'is_band_{i:d}' for i in range(num_bands)]
-    feat_names.extend(func_names)
+        func_names = [f'is_band_{i:d}' for i in range(num_bands)]
+        feat_names.extend(func_names)
 
-    # Allocate numpy placeholder for computed feats
-    m2_array = np.zeros(
-        shape=(oids.size, num_bands)
-    )
+        # Allocate numpy placeholder for computed feats
+        mf_array = np.zeros(
+            shape=(oids.size, num_bands)
+        )
 
-    # Compute 'm' (flux) feats
-    for i, (oid_curves, detect_curves) in enumerate(zip(lcs[1], lcs[3])):
-        for k, (band, dband) in enumerate(zip(oid_curves, detect_curves)):
-            detections = dband.astype(bool)
-            if not np.any(detections):
-                m_array[i, k] = 0
-            else:
-                m_array[i, k] = 1
+        # Compute 'm' (flux) feats
+        for i, (oid_curves, detect_curves) in enumerate(zip(lcs[1], lcs[3])):
+            for k, (band, dband) in enumerate(zip(oid_curves, detect_curves)):
+                detections = dband.astype(bool)
+                if not np.any(detections):
+                    mf_array[i, k] = 0
+                else:
+                    mf_array[i, k] = 1
+
+        feat_arrays.append(mf_array)
+
 
 
     '''
-    td-related feats (mjd, detected)
+    t-related feats (mjd, detected)
     '''
-    num_feats = 3
+    if compute_feats['t-feats']:
 
-    # Allocate numpy placeholder for computed feats
-    t_array = np.zeros(
-        shape=(oids.size, num_feats)
-    )
+        num_feats = 3
 
-    # Define feats to compute
-    def detected_feats(ts, ds):
-        '''
-        Compute several detected-related feats on aggregated channels:
-            1) Max 1's amplitude
-            2) Num. 1 blocks
-            3) Avg. 1 block duration
-        '''
+        # Allocate numpy placeholder for computed feats
+        t_array = np.zeros(
+            shape=(oids.size, num_feats)
+        )
 
-        # Get all bands info in a single matrix
-        td_matrix = np.vstack([np.hstack(ts), np.hstack(ds)]).T
+        # Define feats to compute
+        def detected_feats(ts, ds):
+            '''
+            Compute several detected-related feats on aggregated channels:
+                1) Max 1's amplitude
+                2) Num. 1 blocks
+                3) Avg. 1 block duration
+            '''
 
-        # Sort by mjd
-        td_matrix = td_matrix[td_matrix[:, 0].argsort()]
+            # Get all bands info in a single matrix
+            td_matrix = np.vstack([np.hstack(ts), np.hstack(ds)]).T
 
-        # Compute mjd groups
-        prev_detected = False
-        mjd_groups = []  # Final var holding all collect groups
-        curr_group = []  # Temp var to collect group info in loop
+            # Sort by mjd
+            td_matrix = td_matrix[td_matrix[:, 0].argsort()]
 
-        for line in td_matrix:
-            mjd, detected = line[0], bool(line[1])
-            if prev_detected and not detected:
-                # Just finished group
+            # Compute mjd groups
+            prev_detected = False
+            mjd_groups = []  # Final var holding all collect groups
+            curr_group = []  # Temp var to collect group info in loop
+
+            for line in td_matrix:
+                mjd, detected = line[0], bool(line[1])
+                if prev_detected and not detected:
+                    # Just finished group
+                    mjd_groups.append(curr_group)
+                    curr_group = []
+                    prev_detected = False
+                if detected:
+                    # Going through/starting group
+                    curr_group.append(mjd)
+                    prev_detected = True
+
+            # Append last group
+            if curr_group:
                 mjd_groups.append(curr_group)
-                curr_group = []
-                prev_detected = False
-            if detected:
-                # Going through/starting group
-                curr_group.append(mjd)
-                prev_detected = True
 
-        # Append last group
-        if curr_group:
-            mjd_groups.append(curr_group)
+            # Compute feats
 
-        # Compute feats
+            # Amplitude
+            amp = mjd_groups[-1][-1] - mjd_groups[0][0]
+            # Num. of groups (1-blocks)
+            n_gps = len(mjd_groups)
+            # Average group duration
+            mean_gp = np.mean([g[-1] - g[0] for g in mjd_groups])
 
-        # Amplitude
-        amp = mjd_groups[-1][-1] - mjd_groups[0][0]
-        # Num. of groups (1-blocks)
-        n_gps = len(mjd_groups)
-        # Average group duration
-        mean_gp = np.mean([g[-1] - g[0] for g in mjd_groups])
+            return np.array([
+                amp,
+                n_gps,
+                mean_gp,
+            ])
 
-        return np.array([
-            amp,
-            n_gps,
-            mean_gp,
+
+        feats_to_compute = [detected_feats]
+        feat_names.extend([
+            'det_amplitude',
+            'det_n_1_blocks',
+            'det_avg_1_block_duration',
+
         ])
 
+        # Compute 'td' (mjd/detected)-related feats
+        for i,(oid_t_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[3])):
+            for j,f in enumerate(feats_to_compute):
+                t_array[i,:] = f(oid_t_curves, oid_d_curves)
 
-    feats_to_compute = [detected_feats]
-
-    feat_names.extend([
-        'det_amplitude',
-        'det_n_1_blocks',
-        'det_avg_1_block_duration',
-
-    ])
-
-
-    # Compute 'td' (mjd/detected)-related feats
-    for i,(oid_t_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[3])):
-        for j,f in enumerate(feats_to_compute):
-            t_array[i,:] = f(oid_t_curves, oid_d_curves)
-
+        feat_arrays.append(t_array)
 
 
 
     '''
     Simple d feats
     '''
+    if compute_feats['d-feats']:
 
-    # Define feats to compute
-    feats_to_compute = [np.mean, np.std, skew]
-    num_bands = 6
-    func_names = ['detected_'+n for n in ['mean', 'std', 'skew']]
+        # Define feats to compute
+        feats_to_compute = [np.mean]
+        num_bands = 6
+        func_names = ['detected_'+n for n in ['mean']]
 
-    for fn in func_names:
-        feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+        for fn in func_names:
+            feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
-    # Allocate numpy placeholder for computed feats
-    d_array = np.zeros(
-        shape=(oids.size, num_bands * len(func_names))
-    )
+        # Allocate numpy placeholder for computed feats
+        d_array = np.zeros(
+            shape=(oids.size, num_bands * len(func_names))
+        )
 
-    # Compute 'd' (detected) feats
-    for i, oid_curves in enumerate(lcs[3]):
-        for j, f in enumerate(feats_to_compute):
-            for k, band in enumerate(oid_curves):
-                d_array[i, j * num_bands + k] = f(band)
+        # Compute 'd' (detected) feats
+        for i, oid_curves in enumerate(lcs[3]):
+            for j, f in enumerate(feats_to_compute):
+                for k, band in enumerate(oid_curves):
+                    d_array[i, j * num_bands + k] = f(band)
+
+        feat_arrays.append(d_array)
 
 
 
+    '''
+    Cesium feats
+    '''
+    if compute_feats['cesium-feats']:
+
+        # Define feats to compute
+        cesium_feat_names = [
+            'qso_log_chi2_qsonu',
+            'qso_log_chi2nuNULL_chi2nu',
+            'stetson_j',
+            'stetson_k',
+            'amplitude',
+            'max_slope',
+            'median_absolute_deviation',
+        ]
+
+        num_bands = 6
+
+        for fn in cesium_feat_names:
+            feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
+        # Allocate numpy placeholder for computed feats
+        c_array = np.zeros(
+            shape=(oids.size, num_bands * len(cesium_feat_names))
+        )
+
+        # Compute cesium feats
+        for i, (t_curve, m_curve, e_curve) in tqdm.tqdm(enumerate(zip(lcs[0], lcs[1], lcs[2])), total=len(lcs[0])):
+            ts = cesium.time_series.TimeSeries(t=t_curve, m=m_curve, e=e_curve)
+            dict_feats = cesium.featurize.featurize_single_ts(ts, cesium_feat_names)
+            for j, ces_feat in enumerate(cesium_feat_names):
+                c_array[i,j:j+num_bands] = dict_feats[ces_feat].values
+
+        feat_arrays.append(c_array)
+
+    
+    
+    
 
 
     '''
@@ -181,7 +291,7 @@ def atomic_worker(args):
     '''
 
     # Stack oids to feat results
-    df_array = np.hstack([np.expand_dims(oids, 1), m_array, t_array, d_array, m2_array])
+    df_array = np.hstack([np.expand_dims(oids, 1)] + feat_arrays)
 
     # Build final pandas dataframe
     df = pd.DataFrame(
@@ -236,15 +346,21 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
     df = df.astype(types_dict)
 
     df.reset_index(drop=True).to_hdf(save_dir+'/'+save_name, key='w')
+    # Also save feature names
+    feat_list = list(df.columns)[1:]
+    with open(save_dir+'/'+save_name.split('.h5')[0]+'.txt', 'w') as f:
+        f.writelines([f'{feat_name}\n' for feat_name in feat_list])
+    with open(save_dir+'/'+save_name.split('.h5')[0]+'.pkl', 'wb') as f2:
+        pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_v3_isband.h5',
+    save_name=set_str+'_set_feats_r2_filtered_flux.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
-    n_batches=1,
+    n_batches=8,
 )
 print(f'>   featgen_standard_v2 : Wall time : {(time.time()-st):.2f} seconds')
 

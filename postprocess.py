@@ -4,7 +4,6 @@ import tqdm
 
 def build_prior_table(approx_freqs_dict):
     classes = np.sort(np.unique(np.array([int(s.split('_')[1]) for s in approx_freqs_dict.keys()])))
-    print(classes)
     lookup = {c: i for i, c in enumerate(classes)}
 
     ptable = np.zeros((classes.shape[0], 2))
@@ -14,30 +13,133 @@ def build_prior_table(approx_freqs_dict):
         bin_index = 0 if bin_str == 'g' else 1
         row_index = lookup[class_]
         ptable[row_index, bin_index] = v
+
+    # Up until here ptable denotes p(class=ci AND bin=gi). We must compute ptable p(class=ci | bin=gi). Thus:
+    ptable /= np.sum(ptable, axis=0)
+
     return ptable
+
 
 def build_sub_table(sub_, rs_bins_):
     return np.vstack([
-        np.sum(sub_[rs_bins_==0,1:], axis=0) / np.sum(sub_[:,1:]),
-        np.sum(sub_[rs_bins_!=0,1:], axis=0) / np.sum(sub_[:,1:])
+        np.mean(sub_[rs_bins_ == 0, 1:], axis=0),
+        np.mean(sub_[rs_bins_ != 0, 1:], axis=0),
     ]).T
 
 def migrate_sub(prior_table_, sub_table_, sub__, rs_bins_):
     sub_ = np.copy(sub__)
+
+
+    # Step 0 - Define mig. frontiers
+    # mig_frontiers = np.array([
+    #     [.95, .99],
+    #     [.85, .95],
+    #     [.9, .99],
+    #     [.7, .95],
+    #     [.7, .95],
+    #     [.99, .999],
+    #     [.9, .95],
+    #     [.95, .99],
+    #     [.98, .99],
+    #     [.95, .99],
+    #     [.96, .98],
+    #     [.6, .95],
+    #     [.92, .94],
+    #     [.95, .99]
+    # ])
+    mig_frontiers = np.vstack([[0.5, 0.8] for i in range(14)])
+
+    mig_frontiers = np.hstack([np.zeros((mig_frontiers.shape[0],1)), mig_frontiers, np.ones((mig_frontiers.shape[0],1))])
+
+    # # DUMMY FRONTS
+    # mig_frontiers = np.array([
+    #     [0, .5, 1],
+    #     [0, .5, 1],
+    #     [0, .5, 1],
+    #     [0, .5, 1],
+    # ])
+
     # Step I - build migration matrix
 
-    interp = 1.0  # % of density to migrate
-    migration_matrix = np.zeros(sub_[:, 1:-1].shape)
+    sub_set = sub_[:, 1:-1] # Discard object_id and class 99
 
-    for col_num in np.arange(sub_[:, 1:-1].shape[1]):  # For each class except 99 determine const scale factor
+    ideal_sub_set = np.zeros(sub_set.shape)
 
-        # Bin 0 - galactic
-        migration_matrix[rs_bins_ == 0, col_num] = interp * prior_table_[col_num, 0] / sub_table_[col_num, 0]
+    # Precompute bin prob sums
+    bin_sums_precomputed = [
+        np.sum(sub_[rs_bins_==0,1:]), #Discard o_id but keep class 99
+        np.sum(sub_[rs_bins_!=0,1:]), #Discard o_id but keep class 99
+    ]
 
-        # Bins 1-9 - extragalactic
-        migration_matrix[rs_bins_ != 0, col_num] = interp * prior_table_[col_num, 1] / sub_table_[col_num, 1]
+    for col_num in np.arange(sub_set.shape[1]):  # For each class except 99 determine const scale factor
 
-    migration_matrix = sub_[:, 1:-1] * (1 - migration_matrix)
+        # Define prob bins
+        cond_probs_bins = [
+            sub_set[rs_bins_ == 0, col_num],
+            sub_set[rs_bins_ != 0, col_num]
+        ]
+
+        for bin_n in [0,1]:
+
+            cond_probs_bin = cond_probs_bins[bin_n]
+
+            # Calc factor
+            factor = prior_table_[col_num, bin_n] / sub_table_[col_num, bin_n]
+
+            # Get sorted probs
+            sort_by_probs = np.argsort(cond_probs_bin) # Ascending
+            cond_probs_bin = cond_probs_bin[sort_by_probs]
+
+            # Calculate sum borders
+            num_elements = cond_probs_bin.shape[0]
+            borders = np.floor(mig_frontiers[col_num,:] * num_elements).astype(int)
+
+            # Calculate sums
+            sums = np.array([np.sum(cond_probs_bin[borders[i]:borders[i+1]]) for i in range(borders.shape[0]-1)])
+
+            # Define m weights
+            m_w = np.array([0,0.5,1])
+            # #DUMMY
+            # m_w = np.array([0.5,1])
+
+            # Calculate m depending on factor
+            sum_bin = bin_sums_precomputed[bin_n]
+
+            # Reverse weights if we need to decrease overall probability
+            if factor < 1:
+                m_w = m_w[::-1]
+
+            # Calc m
+            sum_inner = np.inner(m_w, sums)
+            assert sum_inner != 0
+            m = (sum_bin * prior_table_[col_num, bin_n] - np.sum(sums)) / sum_inner
+
+            # Apply m to produce ideal sub
+            ideal_cond_probs_bin = cond_probs_bin.copy()
+            for i in range(borders.shape[0] - 1):
+                ideal_cond_probs_bin[borders[i]:borders[i+1]] *= (1 + m_w[i] * m)
+
+            # Unsort back
+            ideal_cond_probs_bin = ideal_cond_probs_bin[np.argsort(sort_by_probs)]
+
+            # Plug into ideal sub matrix
+            if bin_n==0:
+                ideal_sub_set[rs_bins_==0,col_num] = ideal_cond_probs_bin
+            else:
+                ideal_sub_set[rs_bins_!=0,col_num] = ideal_cond_probs_bin
+
+    migration_matrix = sub_set - ideal_sub_set
+
+
+
+
+
+
+
+
+
+
+
 
     # Step II - migrate probabilities per row
 
@@ -48,34 +150,37 @@ def migrate_sub(prior_table_, sub_table_, sub__, rs_bins_):
         pos_cols = np.where(mm_line > 0)[0]
 
         # Get negative col indexes sorted by descending sub confidence
-        # This makes sense since we'll transfer superavit probability elsewhere where we are more confident
+        # This makes sense since we'll transfer superavit probability elsewhere where we are more confident first
         neg_cols = np.where(mm_line < 0)[0]
         sorted_ixs = np.argsort(sub_line[neg_cols])[::-1]
         neg_cols = neg_cols[sorted_ixs]
 
         # For each positive col try to empty it across neg cols
         for pos_col in pos_cols:
-            budget = mm_line[pos_col]
             for neg_col in neg_cols:
                 if mm_line[neg_col] == 0:  # Neg col already satisfied
                     continue
 
-                budget += mm_line[neg_col]  # Update budget
+                budget = np.min([mm_line[pos_col], sub_line[pos_col]]) # To prevent taking more prob than we have
 
-                if budget <= 0:
-                    sub_line[pos_col] -= mm_line[pos_col]
-                    sub_line[neg_col] += mm_line[pos_col]
-                    mm_line[neg_col] += mm_line[pos_col]
+                max_necessity = -np.min([np.abs(mm_line[neg_col]), 1-sub_line[neg_col]])
+                leftover_budget = budget + max_necessity  # Update budget
+
+                if leftover_budget <= 0:
+                    sub_line[pos_col] -= budget
+                    sub_line[neg_col] += budget
+                    mm_line[neg_col] += budget
                     break  # Budget just ran out, next pos col - must break out to pos cols loop
                 else:
-                    sub_line[pos_col] += mm_line[neg_col]
-                    sub_line[neg_col] += -mm_line[neg_col]  # - to get abs val
-                    mm_line[pos_col] += mm_line[neg_col] # Update migration superavit
+                    sub_line[pos_col] += max_necessity
+                    mm_line[pos_col] += max_necessity # Update migration superavit
+                    sub_line[neg_col] += -max_necessity  # - to get abs val
                     mm_line[neg_col] = 0  # Neg col satisfied
 
         # Assign migrated line
         sub_[i, 1:-1] = sub_line
         assert not np.any(sub_line<0)
+        assert not np.any(sub_line>1)
 
     return sub_
 
@@ -90,14 +195,10 @@ test_sub = np.array(
 
 test_rs_bins = np.array([0,0,1,1])
 test_sub_table = build_sub_table(test_sub, test_rs_bins)
-test_prior_table = np.array(
-    [
-        [0.125-0.07, 0.15+0.07 ],
-        [0.15-0.07 , 0.2+0.07  ],
-        [0.075+0.02, 0.05-0.02 ],
-        [0.1+0.02  , 0.05-0.02 ],
-        [0.05 , 0.05 ]]
-)
+test_prior_table = test_sub_table.copy()
+test_prior_table[:2,:] += 0.1
+test_prior_table[2:-1,:] -= 0.1
+
 # Test code
 #new_sub = migrate_sub(test_prior_table, test_sub_table, test_sub, test_rs_bins)
 
@@ -141,7 +242,7 @@ approx_freqs = {
 }
 
 # Load submission
-sub = pd.read_csv('subs/sub_nn_const99_0.8928.csv').values
+sub = pd.read_csv('subs/sub_v3_isband_0.7691.csv').values
 
 # Load rs_bin info
 rs_bins = np.load('data/rs_bins.npy')
@@ -150,9 +251,11 @@ prior_table = build_prior_table(approx_freqs)
 sub_table = build_sub_table(sub, rs_bins)
 
 np.set_printoptions(suppress=True)
-print(prior_table, sub_table)
+print(prior_table)
+print(sub_table)
 
 shifted_sub = migrate_sub(prior_table, sub_table, sub, rs_bins)
+print(build_sub_table(shifted_sub, rs_bins))
 
 # Save shifted sub
 
@@ -166,7 +269,7 @@ for s in col_names:
 h = h[:-1]
 
 np.savetxt(
-    fname='subs/sub_nn_const99_0.8928s.csv',
+    fname='subs/sub_v3_isband_minorgatsby_0.7691.csv',
     X=shifted_sub,
     fmt=['%d'] + ['%.4f'] * num_classes,
     delimiter=',',

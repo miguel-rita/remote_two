@@ -1,4 +1,4 @@
-import os, time, tqdm, itertools
+import os, time, tqdm, itertools, pickle
 from functools import reduce
 
 import pandas as pd
@@ -143,8 +143,7 @@ def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix'
     else:
         print('Confusion matrix, without normalization')
 
-    print(cm)
-
+    plt.figure(figsize=(10, 8))
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
     plt.colorbar()
@@ -161,8 +160,8 @@ def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix'
 
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
-    plt.tight_layout()
-    plt.show()
+    plt.savefig('confusion.png')
+    plt.clf()
 
 '''
 Load data
@@ -173,14 +172,24 @@ meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
 train_feats_list = [
-    'data/training_feats/training_set_feats_v3_isband.h5',
+    'data/training_feats/training_set_feats_r2_v1.h5',
+    'data/training_feats/training_set_feats_r2_max_slope.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_std.h5'
+    'data/test_feats/test_set_feats_r2_v1.h5',
+    'data/test_feats/test_set_feats_r2_max_slope.h5',
 ]
 train = concat_feats(train_feats_list, meta_train)
 test = concat_feats(test_feats_list, meta_test)
-train_cols.extend(list(train.columns)[1:]) # Jump object_id
+
+# Select feat subset
+
+# Load desired subset
+with open('data/training_feats/training_set_feats_r2_v1_test.pkl', 'rb') as f:
+    feat_subset = pickle.load(f)
+if 'object_id' in feat_subset:
+    feat_subset.remove('object_id')
+train_cols.extend(feat_subset)
 
 
 
@@ -211,8 +220,6 @@ class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
 label_encode = {c: i for i, c in enumerate(class_codes)}
 weights = np.array([class_weights[i] for i in range(len(class_weights))])
 
-
-
 # CV cycle collectors
 importances = pd.DataFrame()
 y_preds_oof = np.zeros((y_tgt.size, weights.size))
@@ -220,16 +227,12 @@ y_test = np.zeros((test.shape[0], weights.size))
 eval_losses = []
 bsts = []
 
-
-
 # Setup stratified CV
 num_folds = 5
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
-
-
 # Compute sample weights
-sample_weights = compute_sample_weight(class_weights_dict, y_tgt)
+sample_weights = compute_sample_weight('balanced', y_tgt)
 
 
 
@@ -254,8 +257,8 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
         n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
-        reg_alpha=0.00,
-        reg_lambda=0.00,
+        reg_alpha=1,
+        reg_lambda=2,
         silent=True,
     )
 
@@ -263,8 +266,8 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bst.fit(
         X=x_train,
         y=y_train,
-        #sample_weight=list(sample_weights_train),
-        #eval_sample_weight=list(sample_weights_eval),
+        sample_weight=sample_weights_train,
+        eval_sample_weight=[sample_weights_eval],
         eval_set=[(x_eval, y_eval)],
         eval_names=['\neval_set'],
         eval_class_weight=[class_weights],
@@ -297,7 +300,7 @@ save_importances(importances)
 y_preds = np.argmax(y_preds_oof, axis=1)
 y_preds = np.array([class_codes[i] for i in y_preds])
 cm = confusion_matrix(y_tgt, y_preds)
-plot_confusion_matrix(cm, classes=[str(c) for c in class_codes])
+plot_confusion_matrix(cm, classes=[str(c) for c in class_codes], normalize=True)
 
 if produce_sub:
-    save_submission(y_test, f'./subs/sub_sample_weight_new3feats_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
+    save_submission(y_test, f'./subs/sub_r2_v2_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
