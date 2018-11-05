@@ -89,7 +89,7 @@ def weighted_mc_crossentropy(y_true, y_pred, weighted=True):
 def save_importances(imps_):
     mean_gain = imps_[['gain', 'feat']].groupby('feat').mean().reset_index()
     mean_gain.index.name = 'feat'
-    plt.figure(figsize=(6, 9))
+    plt.figure(figsize=(6, 17))
     sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
     plt.tight_layout()
     plt.savefig('imps.png')
@@ -174,10 +174,12 @@ meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
 train_feats_list = [
     'data/training_feats/training_set_feats_r2_v7.h5',
     'data/training_feats/training_set_feats_r2_slope_v2.h5',
+    #'data/training_feats/training_set_feats_r2_exp.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_r2_v7.h5',
-    'data/test_feats/test_set_feats_r2_slope_v2.h5',
+    #'data/test_feats/test_set_feats_r2_v7.h5',
+    #'data/test_feats/test_set_feats_r2_slope_v2.h5',
+    'data/test_feats/test_set_feats.h5',
 ]
 train = concat_feats(train_feats_list, meta_train)
 test = concat_feats(test_feats_list, meta_test)
@@ -262,6 +264,7 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
         reg_alpha=1,
         reg_lambda=2,
         silent=True,
+        verbose=-1,
     )
 
     # Train bst

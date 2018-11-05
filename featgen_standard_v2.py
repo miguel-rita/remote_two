@@ -25,13 +25,13 @@ def atomic_worker(args):
     feat_names = []
     feat_arrays = []
     compute_feats = {
-        'm-feats'            : True,
-        'm-feats-filtered'   : False,
-        't-feats'            : True,
-        'd-feats'            : True,
-        'cesium-feats'       : False,
-        'slope-feats'        : False,
-        'exp'                : False,
+        'm-feats'            : bool(0),
+        'm-feats-filtered'   : bool(0),
+        't-feats'            : bool(0),
+        'd-feats'            : bool(0),
+        'cesium-feats'       : bool(0),
+        'slope-feats'        : bool(0),
+        'exp'                : bool(1),
     }
 
 
@@ -150,55 +150,58 @@ def atomic_worker(args):
     '''
     if compute_feats['exp']:
 
-        num_feats = 1
+        num_feats = 6
 
         # Allocate numpy placeholder for computed feats
         exp_array = np.zeros(
-            shape=(oids.size, num_feats * 6)
+            shape=(oids.size, 6)
         )
+
+        for exp_feat_name in ['exp_decay']:
+            feat_names.extend([exp_feat_name+f'_{i:d}' for i in range(6)])
 
         # Define feats to compute
         def exp_feats(ts, ms, ds):
             '''
-            Compute delta m15 on transients
+            WIP - experimental cross band decay speed
             '''
 
-            comp_feats = np.ones(6) * 10
+            comp_feats = np.zeros(6)
 
             for i, (t,m,d) in enumerate(zip(ts,ms,ds)):
 
-                # Check if null or near null band
-                if np.sum(d) <= 1:
+                if np.sum(d) <= 1: # If 0 or 1 measurements interval duration is 0
                     continue
 
-                # Check if transient
-                det_indexes = np.where(d==1)[0]
-                diff = det_indexes[1:]-det_indexes[:-1]
-                if np.any(diff != 1): # More than 1 group
-                    continue
+                # Compute mjd groups
+                prev_detected = False
+                mjd_groups = []  # Final var holding all collect groups
+                curr_group = []  # Temp var to collect group info in loop
+                for ti, di in zip(t, d):
+                    if prev_detected and not bool(di):
+                        # Just finished group
+                        mjd_groups.append(curr_group)
+                        curr_group = []
+                        prev_detected = False
+                    if bool(di):
+                        # Going through/starting group
+                        curr_group.append(ti)
+                        prev_detected = True
+                # Append last group
+                if curr_group:
+                    mjd_groups.append(curr_group)
 
-                # Find peak location
-
-                m = (m - np.mean(m[d])) / (np.max(m[d]) - np.min(m[d]))
-
-                peak_index = np.argmax(m[d])
-                peak_t = t[peak_index]
-                peak_m = m[peak_index]
-
-                # Walk from peak forward until we pass the 15 day mark
-                for m_after_peak, t_after_peak in zip(m[d][peak_index:], t[d][peak_index:]):
-                    if t_after_peak - peak_t >= 15:
-                        comp_feats[i] = m_after_peak - peak_m
-                        break
+                # Compute mean duration across groups
+                comp_feats[i] = np.mean([g[-1]-g[0] for g in mjd_groups])
 
             return comp_feats
 
-
-        feat_names.extend([f'exp_{i}' for i in range(6)])
-
-        # Compute 'td' (mjd/detected)-related feats
+        # Compute absolute decay values per band
         for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
             exp_array[i, :] = exp_feats(oid_t_curves, oid_m_curves, oid_d_curves)
+
+        # Compute rel decay values
+        exp_array = exp_array / np.sum(exp_array, axis=1)[:, None]
 
         feat_arrays.append(exp_array)
 
@@ -348,7 +351,7 @@ def atomic_worker(args):
 
 
     '''
-    Agg feats and wrap up
+    Aggregate all feats and wrap up
     '''
 
     # Stack oids to feat results
@@ -415,11 +418,11 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
         pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-set_str = 'test'
+set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r2_v7.h5',
+    save_name=set_str+'_set_feats_r2_exp.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )
