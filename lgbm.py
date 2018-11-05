@@ -172,11 +172,11 @@ meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
 
 # Get data
 train_feats_list = [
-    'data/training_feats/training_set_feats_r2_v1.h5',
+    'data/training_feats/training_set_feats_r2_v7.h5',
     'data/training_feats/training_set_feats_r2_slope_v2.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_r2_v1.h5',
+    'data/test_feats/test_set_feats_r2_v7.h5',
     'data/test_feats/test_set_feats_r2_slope_v2.h5',
 ]
 train = concat_feats(train_feats_list, meta_train)

@@ -25,12 +25,13 @@ def atomic_worker(args):
     feat_names = []
     feat_arrays = []
     compute_feats = {
-        'm-feats'            : False,
+        'm-feats'            : True,
         'm-feats-filtered'   : False,
-        't-feats'            : False,
-        'd-feats'            : False,
+        't-feats'            : True,
+        'd-feats'            : True,
         'cesium-feats'       : False,
-        'slope-feats'        : True,
+        'slope-feats'        : False,
+        'exp'                : False,
     }
 
 
@@ -60,6 +61,16 @@ def atomic_worker(args):
                     m_array[i,j*num_bands+k] = f(band)
 
         feat_arrays.append(m_array)
+
+        # Compute cross flux relations
+        cross_band_names = ['cross_band_flux_mean_contrib', 'cross_band_flux_max_contrib']
+        for fn in cross_band_names:
+            feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+        mc_array = np.hstack([
+            m_array[:,:6] / np.sum(m_array[:,6:12], axis=1)[:,None],
+            m_array[:,6:12] / np.sum(m_array[:,6:12], axis=1)[:,None],
+        ])
+        feat_arrays.append(mc_array)
 
     '''
     slope feats
@@ -106,8 +117,6 @@ def atomic_worker(args):
 
         feat_arrays.append(s_array)
 
-
-
     '''
     m-feats (filtered flux) - for now empty bands
     '''
@@ -136,7 +145,62 @@ def atomic_worker(args):
 
         feat_arrays.append(mf_array)
 
+    '''
+    Experimental feats
+    '''
+    if compute_feats['exp']:
 
+        num_feats = 1
+
+        # Allocate numpy placeholder for computed feats
+        exp_array = np.zeros(
+            shape=(oids.size, num_feats * 6)
+        )
+
+        # Define feats to compute
+        def exp_feats(ts, ms, ds):
+            '''
+            Compute delta m15 on transients
+            '''
+
+            comp_feats = np.ones(6) * 10
+
+            for i, (t,m,d) in enumerate(zip(ts,ms,ds)):
+
+                # Check if null or near null band
+                if np.sum(d) <= 1:
+                    continue
+
+                # Check if transient
+                det_indexes = np.where(d==1)[0]
+                diff = det_indexes[1:]-det_indexes[:-1]
+                if np.any(diff != 1): # More than 1 group
+                    continue
+
+                # Find peak location
+
+                m = (m - np.mean(m[d])) / (np.max(m[d]) - np.min(m[d]))
+
+                peak_index = np.argmax(m[d])
+                peak_t = t[peak_index]
+                peak_m = m[peak_index]
+
+                # Walk from peak forward until we pass the 15 day mark
+                for m_after_peak, t_after_peak in zip(m[d][peak_index:], t[d][peak_index:]):
+                    if t_after_peak - peak_t >= 15:
+                        comp_feats[i] = m_after_peak - peak_m
+                        break
+
+            return comp_feats
+
+
+        feat_names.extend([f'exp_{i}' for i in range(6)])
+
+        # Compute 'td' (mjd/detected)-related feats
+        for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
+            exp_array[i, :] = exp_feats(oid_t_curves, oid_m_curves, oid_d_curves)
+
+        feat_arrays.append(exp_array)
 
     '''
     t-related feats (mjd, detected)
@@ -217,8 +281,6 @@ def atomic_worker(args):
 
         feat_arrays.append(t_array)
 
-
-
     '''
     Simple d feats
     '''
@@ -244,8 +306,6 @@ def atomic_worker(args):
                     d_array[i, j * num_bands + k] = f(band)
 
         feat_arrays.append(d_array)
-
-
 
     '''
     Cesium feats
@@ -359,7 +419,7 @@ set_str = 'test'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r2_slope_v2.h5',
+    save_name=set_str+'_set_feats_r2_v7.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )
