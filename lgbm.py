@@ -173,20 +173,22 @@ meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
 # Get data
 train_feats_list = [
     'data/training_feats/training_set_feats_r2_v1.h5',
-    'data/training_feats/training_set_feats_r2_max_slope.h5',
+    'data/training_feats/training_set_feats_r2_slope_v2.h5',
 ]
 test_feats_list = [
     'data/test_feats/test_set_feats_r2_v1.h5',
-    'data/test_feats/test_set_feats_r2_max_slope.h5',
+    'data/test_feats/test_set_feats_r2_slope_v2.h5',
 ]
 train = concat_feats(train_feats_list, meta_train)
 test = concat_feats(test_feats_list, meta_test)
 
 # Select feat subset
+feat_subset = []
+for feat_list in train_feats_list:
+    with open(feat_list.split('.h5')[0]+'.pkl', 'rb') as f:
+        feat_subset.extend(pickle.load(f))
 
-# Load desired subset
-with open('data/training_feats/training_set_feats_r2_v1_test.pkl', 'rb') as f:
-    feat_subset = pickle.load(f)
+
 if 'object_id' in feat_subset:
     feat_subset.remove('object_id')
 train_cols.extend(feat_subset)

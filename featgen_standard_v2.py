@@ -26,11 +26,11 @@ def atomic_worker(args):
     feat_arrays = []
     compute_feats = {
         'm-feats'            : False,
-        'm-feats-filtered'   : True,
+        'm-feats-filtered'   : False,
         't-feats'            : False,
         'd-feats'            : False,
         'cesium-feats'       : False,
-        'slope-feats'        : False,
+        'slope-feats'        : True,
     }
 
 
@@ -68,26 +68,25 @@ def atomic_worker(args):
 
         def slope_feats(ts, ms, ds):
             '''
-            Custom compute of slope feats. Atm:
-            1) Max slope per band
+            Custom compute of slope feats
             '''
 
             if np.sum(ds) <= 1: # 0 or 1 detected points are insufficient for slope computation
-                return 0
+                return np.zeros(5)
 
             # Unused
             mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
 
             s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
 
-            return np.max(s)
+            return np.array([np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
 
 
         # Define feats to compute
         feats_to_compute = [slope_feats]
         num_bands = 6
         local_names = []
-        for fn in ['slope_max']:
+        for fn in ['slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
             local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
         feat_names.extend(local_names)
@@ -99,9 +98,11 @@ def atomic_worker(args):
 
         # Compute slope feats
         for i, (t_curves, m_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
-            for j, f in enumerate(feats_to_compute):
-                for k, (ts, ms, ds) in enumerate(zip(t_curves, m_curves, d_curves)):
-                    s_array[i, j * num_bands + k] = f(ts, ms, ds)
+            for j, (ts, ms, ds) in enumerate(zip(t_curves, m_curves, d_curves)):
+                for f in feats_to_compute:
+                    fts = f(ts, ms, ds)
+                    _nfeats = len(fts)
+                    s_array[i, j*_nfeats:j*_nfeats+_nfeats] = fts
 
         feat_arrays.append(s_array)
 
@@ -354,11 +355,11 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
         pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-set_str = 'training'
+set_str = 'test'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r2_filtered_flux.h5',
+    save_name=set_str+'_set_feats_r2_slope_v2.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )
