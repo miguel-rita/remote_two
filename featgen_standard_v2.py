@@ -30,8 +30,8 @@ def atomic_worker(args):
         't-feats'            : bool(0),
         'd-feats'            : bool(0),
         'cesium-feats'       : bool(0),
-        'slope-feats'        : bool(0),
-        'exp'                : bool(1),
+        'slope-feats'        : bool(1),
+        'exp'                : bool(0),
     }
 
 
@@ -82,22 +82,31 @@ def atomic_worker(args):
             Custom compute of slope feats
             '''
 
-            if np.sum(ds) <= 1: # 0 or 1 detected points are insufficient for slope computation
-                return np.zeros(5)
-
-            # Unused
             mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
+            mask = mask.astype(np.bool)
+
+            if np.sum(mask) <= 1: # Insufficient pts for slope computation
+                return np.zeros(6)
 
             s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
 
-            return np.array([np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
+            # Inversions feat
+            masked_peak_index = np.argmax(ms[1:][mask])
+
+            inversions = 0
+            for i, s_ in enumerate(s[mask][1:]):
+                if s_ * s[mask][i] < 0:
+                    inversions += 1
+            inversions /= s[mask].shape[0]
+
+            return np.array([inversions, np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
 
 
         # Define feats to compute
         feats_to_compute = [slope_feats]
         num_bands = 6
         local_names = []
-        for fn in ['slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
+        for fn in ['inversions', 'slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
             local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
         feat_names.extend(local_names)
@@ -422,7 +431,7 @@ set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r2_exp.h5',
+    save_name=set_str+'_set_feats_r2_slope_v7.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )
