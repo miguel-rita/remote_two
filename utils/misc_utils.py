@@ -3,6 +3,49 @@ import numpy as np
 import tqdm
 import multiprocessing as mp
 import os, pickle, gc
+import matplotlib.pyplot as plt
+import seaborn as sns
+import itertools
+
+def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
+    """
+    This function prints and plots the confusion matrix.
+    Normalization can be applied by setting `normalize=True`.
+    """
+    if normalize:
+        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        print("Normalized confusion matrix")
+    else:
+        print('Confusion matrix, without normalization')
+
+    plt.figure(figsize=(10, 8))
+    plt.imshow(cm, interpolation='nearest', cmap=cmap)
+    plt.title(title)
+    plt.colorbar()
+    tick_marks = np.arange(len(classes))
+    plt.xticks(tick_marks, classes, rotation=45)
+    plt.yticks(tick_marks, classes)
+
+    fmt = '.2f' if normalize else 'd'
+    thresh = cm.max() / 2.
+    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
+        plt.text(j, i, format(cm[i, j], fmt),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black")
+
+    plt.ylabel('True label')
+    plt.xlabel('Predicted label')
+    plt.savefig('confusion.png')
+    plt.clf()
+
+def save_importances(imps_):
+    mean_gain = imps_[['gain', 'feat']].groupby('feat').mean().reset_index()
+    mean_gain.index.name = 'feat'
+    plt.figure(figsize=(6, 17))
+    sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
+    plt.tight_layout()
+    plt.savefig('imps.png')
+    plt.clf()
 
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):
     '''
@@ -177,10 +220,10 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
         pool.close()
         pool.join()
 
-os.chdir('..')
-set_name = 'test'
-convert_chunks_to_lc_chunks(
-    chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
-    save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
-    n_batches=9,
-)
+# os.chdir('..')
+# set_name = 'test'
+# convert_chunks_to_lc_chunks(
+#     chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
+#     save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
+#     n_batches=9,
+# )

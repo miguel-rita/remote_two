@@ -28,9 +28,10 @@ def atomic_worker(args):
         'm-feats'            : bool(0),
         'm-feats-filtered'   : bool(0),
         't-feats'            : bool(0),
-        'd-feats'            : bool(0),
+        'd-feats'            : bool(1),
+        'e-feats'            : bool(0),
         'cesium-feats'       : bool(0),
-        'slope-feats'        : bool(1),
+        'slope-feats'        : bool(0),
         'exp'                : bool(0),
     }
 
@@ -43,7 +44,7 @@ def atomic_worker(args):
     if compute_feats['m-feats']:
 
         # Define feats to compute
-        feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
+        feats_to_compute = [np.average, np.max, np.min, np.std, skew, kurtosis]
         num_bands = 6
         func_names = ['flux_'+n for n in ['mean', 'max', 'min', 'std', 'skew', 'kurt']]
         for fn in func_names:
@@ -55,10 +56,13 @@ def atomic_worker(args):
         )
 
         # Compute 'm' (flux) feats
-        for i,oid_curves in enumerate(lcs[1]):
+        for i,(flux_curves, err_curves) in enumerate(zip(lcs[1], lcs[2])):
             for j,f in enumerate(feats_to_compute):
-                for k,band in enumerate(oid_curves):
-                    m_array[i,j*num_bands+k] = f(band)
+                for k,(flux_curve, err_curve) in enumerate(zip(flux_curves, err_curves)):
+                    if f == np.average:
+                        m_array[i, j * num_bands + k] = f(flux_curve, weights=1/err_curve)
+                    else:
+                        m_array[i, j * num_bands + k] = f(flux_curve)
 
         feat_arrays.append(m_array)
 
@@ -71,60 +75,6 @@ def atomic_worker(args):
             m_array[:,6:12] / np.sum(m_array[:,6:12], axis=1)[:,None],
         ])
         feat_arrays.append(mc_array)
-
-    '''
-    slope feats
-    '''
-    if compute_feats['slope-feats']:
-
-        def slope_feats(ts, ms, ds):
-            '''
-            Custom compute of slope feats
-            '''
-
-            mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
-            mask = mask.astype(np.bool)
-
-            if np.sum(mask) <= 1: # Insufficient pts for slope computation
-                return np.zeros(6)
-
-            s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
-
-            # Inversions feat
-            masked_peak_index = np.argmax(ms[1:][mask])
-
-            inversions = 0
-            for i, s_ in enumerate(s[mask][1:]):
-                if s_ * s[mask][i] < 0:
-                    inversions += 1
-            inversions /= s[mask].shape[0]
-
-            return np.array([inversions, np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
-
-
-        # Define feats to compute
-        feats_to_compute = [slope_feats]
-        num_bands = 6
-        local_names = []
-        for fn in ['inversions', 'slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
-            local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
-
-        feat_names.extend(local_names)
-
-        # Allocate numpy placeholder for computed feats
-        s_array = np.zeros(
-            shape=(oids.size, len(local_names))
-        )
-
-        # Compute slope feats
-        for i, (t_curves, m_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
-            for j, (ts, ms, ds) in enumerate(zip(t_curves, m_curves, d_curves)):
-                for f in feats_to_compute:
-                    fts = f(ts, ms, ds)
-                    _nfeats = len(fts)
-                    s_array[i, j*_nfeats:j*_nfeats+_nfeats] = fts
-
-        feat_arrays.append(s_array)
 
     '''
     m-feats (filtered flux) - for now empty bands
@@ -153,66 +103,6 @@ def atomic_worker(args):
                     mf_array[i, k] = 1
 
         feat_arrays.append(mf_array)
-
-    '''
-    Experimental feats
-    '''
-    if compute_feats['exp']:
-
-        num_feats = 6
-
-        # Allocate numpy placeholder for computed feats
-        exp_array = np.zeros(
-            shape=(oids.size, 6)
-        )
-
-        for exp_feat_name in ['exp_decay']:
-            feat_names.extend([exp_feat_name+f'_{i:d}' for i in range(6)])
-
-        # Define feats to compute
-        def exp_feats(ts, ms, ds):
-            '''
-            WIP - experimental cross band decay speed
-            '''
-
-            comp_feats = np.zeros(6)
-
-            for i, (t,m,d) in enumerate(zip(ts,ms,ds)):
-
-                if np.sum(d) <= 1: # If 0 or 1 measurements interval duration is 0
-                    continue
-
-                # Compute mjd groups
-                prev_detected = False
-                mjd_groups = []  # Final var holding all collect groups
-                curr_group = []  # Temp var to collect group info in loop
-                for ti, di in zip(t, d):
-                    if prev_detected and not bool(di):
-                        # Just finished group
-                        mjd_groups.append(curr_group)
-                        curr_group = []
-                        prev_detected = False
-                    if bool(di):
-                        # Going through/starting group
-                        curr_group.append(ti)
-                        prev_detected = True
-                # Append last group
-                if curr_group:
-                    mjd_groups.append(curr_group)
-
-                # Compute mean duration across groups
-                comp_feats[i] = np.mean([g[-1]-g[0] for g in mjd_groups])
-
-            return comp_feats
-
-        # Compute absolute decay values per band
-        for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
-            exp_array[i, :] = exp_feats(oid_t_curves, oid_m_curves, oid_d_curves)
-
-        # Compute rel decay values
-        exp_array = exp_array / np.sum(exp_array, axis=1)[:, None]
-
-        feat_arrays.append(exp_array)
 
     '''
     t-related feats (mjd, detected)
@@ -294,16 +184,17 @@ def atomic_worker(args):
         feat_arrays.append(t_array)
 
     '''
-    Simple d feats
+    d-feats
     '''
     if compute_feats['d-feats']:
 
         # Define feats to compute
-        feats_to_compute = [np.mean]
+        feats_to_compute = [np.mean, np.sum]
         num_bands = 6
-        func_names = ['detected_'+n for n in ['mean']]
+        func_names = ['detected_'+n for n in ['mean', 'sum']]
+        local_names = ['detected_'+n for n in ['mean']]
 
-        for fn in func_names:
+        for fn in local_names:
             feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
         # Allocate numpy placeholder for computed feats
@@ -317,7 +208,60 @@ def atomic_worker(args):
                 for k, band in enumerate(oid_curves):
                     d_array[i, j * num_bands + k] = f(band)
 
-        feat_arrays.append(d_array)
+        d2_array = np.max(d_array[:,6:], axis=1, keepdims=True)
+        for i,e in enumerate(d2_array):
+            if e <= 4:
+                d2_array[i] = 10000
+            else:
+                d2_array[i] = 0
+        feat_names.extend(['detected_maxsum'])
+
+        feat_arrays.extend([d_array[:,:6], d2_array])
+
+    '''
+    e-feats (filtered flux_err)
+    '''
+    if compute_feats['e-feats']:
+
+        # Define feats to compute
+        feats_to_compute = [np.mean, np.max, np.std]
+        num_bands = 6
+
+        func_names = ['ferr_' + n for n in ['mean', 'max', 'std']]
+        local_names = []
+        for fn in func_names:
+            local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
+        #feat_names.extend(local_names)
+
+        # Allocate numpy placeholder for computed feats
+        e_array = np.zeros(
+            shape=(oids.size, len(local_names))
+        )
+
+        # Compute 'm' (flux) feats
+        for i, (err_curves, detect_curves) in enumerate(zip(lcs[2], lcs[3])):
+            for j,f in enumerate(feats_to_compute):
+                for k,(err_curve, detect_curve) in enumerate(zip(err_curves, detect_curves)):
+
+                    detect_curve = detect_curve.astype(np.bool)
+
+                    if not np.any(detect_curve):
+                        e_array[i, j * num_bands + k] = 0
+                    else:
+                        e_array[i,j*num_bands+k] = f(err_curve[detect_curve])
+
+        #feat_arrays.append(e_array)
+
+        # Compute cross flux relations
+        cross_band_names = ['cross_band_ferr_mean_contrib', 'cross_band_ferr_max_contrib']
+        for fn in cross_band_names:
+            feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+        ec_array = np.hstack([
+            e_array[:, :6] / np.sum(e_array[:, 6:12], axis=1)[:, None],
+            e_array[:, 6:12] / np.sum(e_array[:, 6:12], axis=1)[:, None],
+        ])
+        feat_arrays.append(ec_array)
 
     '''
     Cesium feats
@@ -354,7 +298,119 @@ def atomic_worker(args):
 
         feat_arrays.append(c_array)
 
-    
+    '''
+    slope feats
+    '''
+    if compute_feats['slope-feats']:
+
+        def slope_feats(ts, ms, ds):
+            '''
+            Custom compute of slope feats
+            '''
+
+            mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
+            mask = mask.astype(np.bool)
+
+            if np.sum(mask) <= 1: # Insufficient pts for slope computation
+                return np.zeros(6)
+
+            s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
+
+            # Inversions feat
+            masked_peak_index = np.argmax(ms[1:][mask])
+
+            inversions = 0
+            for i, s_ in enumerate(s[mask][1:]):
+                if s_ * s[mask][i] < 0:
+                    inversions += 1
+            inversions /= s[mask].shape[0]
+
+            return np.array([inversions, np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
+
+
+        # Define feats to compute
+        feats_to_compute = [slope_feats]
+        num_bands = 6
+        local_names = []
+        for fn in ['inversions', 'slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
+            local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
+        feat_names.extend(local_names)
+
+        # Allocate numpy placeholder for computed feats
+        s_array = np.zeros(
+            shape=(oids.size, len(local_names))
+        )
+
+        # Compute slope feats
+        for i, (t_curves, m_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
+            for j, (ts, ms, ds) in enumerate(zip(t_curves, m_curves, d_curves)):
+                for f in feats_to_compute:
+                    fts = f(ts, ms, ds)
+                    _nfeats = len(fts)
+                    s_array[i, j*_nfeats:j*_nfeats+_nfeats] = fts
+
+        feat_arrays.append(s_array)
+
+    '''
+    Experimental feats
+    '''
+    if compute_feats['exp']:
+
+        num_feats = 6
+
+        # Allocate numpy placeholder for computed feats
+        exp_array = np.zeros(
+            shape=(oids.size, 6)
+        )
+
+        for exp_feat_name in ['exp_decay']:
+            feat_names.extend([exp_feat_name+f'_{i:d}' for i in range(6)])
+
+        # Define feats to compute
+        def exp_feats(ts, ms, ds):
+            '''
+            WIP - experimental cross band decay speed
+            '''
+
+            comp_feats = np.zeros(6)
+
+            for i, (t,m,d) in enumerate(zip(ts,ms,ds)):
+
+                if np.sum(d) <= 1: # If 0 or 1 measurements interval duration is 0
+                    continue
+
+                # Compute mjd groups
+                prev_detected = False
+                mjd_groups = []  # Final var holding all collect groups
+                curr_group = []  # Temp var to collect group info in loop
+                for ti, di in zip(t, d):
+                    if prev_detected and not bool(di):
+                        # Just finished group
+                        mjd_groups.append(curr_group)
+                        curr_group = []
+                        prev_detected = False
+                    if bool(di):
+                        # Going through/starting group
+                        curr_group.append(ti)
+                        prev_detected = True
+                # Append last group
+                if curr_group:
+                    mjd_groups.append(curr_group)
+
+                # Compute mean duration across groups
+                comp_feats[i] = np.mean([g[-1]-g[0] for g in mjd_groups])
+
+            return comp_feats
+
+        # Compute absolute decay values per band
+        for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
+            exp_array[i, :] = exp_feats(oid_t_curves, oid_m_curves, oid_d_curves)
+
+        # Compute rel decay values
+        exp_array = exp_array / np.sum(exp_array, axis=1)[:, None]
+
+        feat_arrays.append(exp_array)
     
     
 
@@ -431,7 +487,7 @@ set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r2_slope_v7.h5',
+    save_name=set_str+'_set_feats_r3_d-feats_v2.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )

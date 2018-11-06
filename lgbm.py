@@ -1,10 +1,5 @@
-import os, time, tqdm, itertools, pickle
-from functools import reduce
-
 import pandas as pd
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 import lightgbm as lgb
 
@@ -13,24 +8,11 @@ from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import confusion_matrix
 
 import utils.preprocess as utils
-
-
+from utils.misc_utils import plot_confusion_matrix, save_importances
 
 '''
 Misc. utils
 '''
-
-def concat_feats(feat_set_list, init):
-    '''
-    Reads and concatenates already computed feats to metadata
-
-    :param feat_set_list:
-    :param init: initial dataframe containing meta feats
-    :return: pandas dataframe containing all specified features with first column being object id
-    '''
-
-    feat_dfs = [pd.read_hdf(path, mode='r') for path in feat_set_list]
-    return reduce(lambda l,r : pd.merge(l,r,how='outer',on='object_id'), feat_dfs, init)
 
 def lgbm_loss_wrapper(y_true, y_pred):
     '''
@@ -86,15 +68,6 @@ def weighted_mc_crossentropy(y_true, y_pred, weighted=True):
     else:
         return - np.sum(y_true * y_pred) / y_true.shape[0]
 
-def save_importances(imps_):
-    mean_gain = imps_[['gain', 'feat']].groupby('feat').mean().reset_index()
-    mean_gain.index.name = 'feat'
-    plt.figure(figsize=(6, 17))
-    sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
-    plt.tight_layout()
-    plt.savefig('imps.png')
-    plt.clf()
-
 def save_submission(y_test, sub_name, rs_bins, nrows=None):
 
     # Get submission header
@@ -132,80 +105,36 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
         comments='',
     )
 
-def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
-    """
-    This function prints and plots the confusion matrix.
-    Normalization can be applied by setting `normalize=True`.
-    """
-    if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
-    else:
-        print('Confusion matrix, without normalization')
-
-    plt.figure(figsize=(10, 8))
-    plt.imshow(cm, interpolation='nearest', cmap=cmap)
-    plt.title(title)
-    plt.colorbar()
-    tick_marks = np.arange(len(classes))
-    plt.xticks(tick_marks, classes, rotation=45)
-    plt.yticks(tick_marks, classes)
-
-    fmt = '.2f' if normalize else 'd'
-    thresh = cm.max() / 2.
-    for i, j in itertools.product(range(cm.shape[0]), range(cm.shape[1])):
-        plt.text(j, i, format(cm[i, j], fmt),
-                 horizontalalignment="center",
-                 color="white" if cm[i, j] > thresh else "black")
-
-    plt.ylabel('True label')
-    plt.xlabel('Predicted label')
-    plt.savefig('confusion.png')
-    plt.clf()
-
 '''
-Load data
+Load and preprocess data
 '''
 
-# Get metadata
-meta_train, meta_test, y_tgt, train_cols = utils.prep_data()
-
-# Get data
 train_feats_list = [
-    'data/training_feats/training_set_feats_r2_v7.h5',
-    'data/training_feats/training_set_feats_r2_slope_v7.h5',
-    #'data/training_feats/training_set_feats_r2_exp.h5',
+    'data/training_feats/training_set_feats_r3_m-feats_weighted_v1.h5',
+    'data/training_feats/training_set_feats_r3_t-feats_v1.h5',
+    'data/training_feats/training_set_feats_r3_d-feats_v2.h5',
+    'data/training_feats/training_set_feats_r3_e-feats_v1.h5',
+    'data/training_feats/training_set_feats_r3_slope-feats_v1.h5',
+    # 'data/training_feats/training_set_feats_r2_v7.h5',
+    # 'data/training_feats/training_set_feats_r2_slope_v2.h5',
+    # 'data/training_feats/training_set_feats_r2_err_v1.h5',
+    # 'data/training_feats/training_set_feats_r2_exp.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_r2_v7.h5',
-    'data/test_feats/test_set_feats_r2_slope_v2.h5',
+    'data/test_feats/test_set_feats_std.h5'
+    # 'data/test_feats/test_set_feats_r2_v7.h5',
+    # 'data/test_feats/test_set_feats_r2_slope_v2.h5',
 ]
-train = concat_feats(train_feats_list, meta_train)
-test = concat_feats(test_feats_list, meta_test)
 
-# Select feat subset
-feat_subset = []
-for feat_list in train_feats_list:
-    with open(feat_list.split('.h5')[0]+'.pkl', 'rb') as f:
-        feat_subset.extend(pickle.load(f))
-
-if 'object_id' in feat_subset:
-    feat_subset.remove('object_id')
-
-feat_subset.remove('inversions_0')
-feat_subset.remove('inversions_1')
-feat_subset.remove('inversions_2')
-feat_subset.remove('inversions_5')
-
-train_cols.extend(feat_subset)
-
-
+train, test, y_tgt, train_cols = utils.prep_data(train_feats_list, test_feats_list)
 
 produce_sub = False
+sub_name = 'v2.8'
 
+'''
+Class weights
+'''
 
-
-# Get sorted class weights
 class_weights_dict = {
     #99 : 2.002408,
     95 : 1.001044,
@@ -228,6 +157,13 @@ class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
 label_encode = {c: i for i, c in enumerate(class_codes)}
 weights = np.array([class_weights[i] for i in range(len(class_weights))])
 
+# Compute sample weights
+sample_weights = compute_sample_weight('balanced', y_tgt)
+
+'''
+Setup CV
+'''
+
 # CV cycle collectors
 importances = pd.DataFrame()
 y_preds_oof = np.zeros((y_tgt.size, weights.size))
@@ -238,11 +174,6 @@ bsts = []
 # Setup stratified CV
 num_folds = 5
 folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
-
-# Compute sample weights
-sample_weights = compute_sample_weight('balanced', y_tgt)
-
-
 
 for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
 
@@ -312,4 +243,4 @@ cm = confusion_matrix(y_tgt, y_preds)
 plot_confusion_matrix(cm, classes=[str(c) for c in class_codes], normalize=True)
 
 if produce_sub:
-    save_submission(y_test, f'./subs/sub_r2_v2_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
+    save_submission(y_test, f'./subs/lgbm_{sub_name}_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)
