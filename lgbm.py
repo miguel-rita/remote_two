@@ -79,8 +79,8 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
     num_ids = object_ids.size
 
     # Class 99 adjustment - remember these are conditional probs on redshift
-    c99_bin0_prob = 0.021019
-    c99_bin1_9_prob = 0.102627
+    c99_bin0_prob = 0.02
+    c99_bin1_9_prob = 0.13
 
     c99_probs = np.zeros((y_test.shape[0],1))
     c99_probs[rs_bins==0] = c99_bin0_prob
@@ -110,26 +110,30 @@ Load and preprocess data
 '''
 
 train_feats_list = [
-    'data/training_feats/training_set_feats_r3_m-feats_weighted_v1.h5',
+    'data/training_feats/training_set_feats_r3_slope-feats_v2.h5',
+    'data/training_feats/training_set_feats_r3_m-feats_v3.h5',
     'data/training_feats/training_set_feats_r3_t-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_d-feats_v2.h5',
+    'data/training_feats/training_set_feats_r3_d-feats_v1.h5',
     'data/training_feats/training_set_feats_r3_e-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_slope-feats_v1.h5',
-    # 'data/training_feats/training_set_feats_r2_v7.h5',
-    # 'data/training_feats/training_set_feats_r2_slope_v2.h5',
-    # 'data/training_feats/training_set_feats_r2_err_v1.h5',
-    # 'data/training_feats/training_set_feats_r2_exp.h5',
+    'data/training_feats/training_set_feats_r3_curve-feats_v1.h5',
+    'data/training_feats/training_set_feats_r3_linreg-feats_v1.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_std.h5'
-    # 'data/test_feats/test_set_feats_r2_v7.h5',
-    # 'data/test_feats/test_set_feats_r2_slope_v2.h5',
+    # 'data/test_feats/test_set_feats_std.h5'
+    'data/test_feats/test_set_feats_r3_slope-feats_v2.h5',
+    'data/test_feats/test_set_feats_r3_m-feats_v3.h5',
+    'data/test_feats/test_set_feats_r3_t-feats_v1.h5',
+    'data/test_feats/test_set_feats_r3_d-feats_v1.h5',
+    'data/test_feats/test_set_feats_r3_e-feats_v1.h5',
+    'data/test_feats/test_set_feats_r3_curve-feats_v1.h5',
+    'data/test_feats/test_set_feats_r3_linreg-feats_v1.h5',
+
 ]
 
 train, test, y_tgt, train_cols = utils.prep_data(train_feats_list, test_feats_list)
 
 produce_sub = False
-sub_name = 'v2.8'
+sub_name = 'v3.4'
 
 '''
 Class weights
@@ -192,12 +196,12 @@ for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
     bst = lgb.LGBMClassifier(
         boosting_type='gbdt',
         num_leaves=7,
-        learning_rate=0.05,
+        learning_rate=0.10,
         n_estimators=10000,
         objective='multiclass',
         class_weight=class_weights,
         reg_alpha=1,
-        reg_lambda=2,
+        reg_lambda=5,
         silent=True,
         verbose=-1,
     )
@@ -241,6 +245,11 @@ y_preds = np.argmax(y_preds_oof, axis=1)
 y_preds = np.array([class_codes[i] for i in y_preds])
 cm = confusion_matrix(y_tgt, y_preds)
 plot_confusion_matrix(cm, classes=[str(c) for c in class_codes], normalize=True)
+
+train = pd.concat([train, pd.DataFrame(y_preds_oof, columns=[str(c) for c in class_codes])], axis=1)
+train['pred'] = y_preds
+train['target'] = y_tgt
+train.to_hdf('train_oof.h5', key='w')
 
 if produce_sub:
     save_submission(y_test, f'./subs/lgbm_{sub_name}_{np.mean(eval_losses):.4f}.csv', rs_bins=test['rs_bin'].values)

@@ -25,14 +25,15 @@ def atomic_worker(args):
     feat_names = []
     feat_arrays = []
     compute_feats = {
-        'm-feats'            : bool(0),
-        'm-feats-filtered'   : bool(0),
+        'm-feats'            : bool(1),
         't-feats'            : bool(0),
-        'd-feats'            : bool(1),
+        'd-feats'            : bool(0),
         'e-feats'            : bool(0),
         'cesium-feats'       : bool(0),
         'slope-feats'        : bool(0),
-        'exp'                : bool(0),
+        'hard-feats'         : bool(0),
+        'curve-feats'        : bool(0),
+        'linreg-feats'       : bool(0),
     }
 
 
@@ -70,39 +71,12 @@ def atomic_worker(args):
         cross_band_names = ['cross_band_flux_mean_contrib', 'cross_band_flux_max_contrib']
         for fn in cross_band_names:
             feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
+
         mc_array = np.hstack([
-            m_array[:,:6] / np.sum(m_array[:,6:12], axis=1)[:,None],
+            m_array[:,:6] / np.sum(m_array[:,:6], axis=1)[:,None],
             m_array[:,6:12] / np.sum(m_array[:,6:12], axis=1)[:,None],
         ])
         feat_arrays.append(mc_array)
-
-    '''
-    m-feats (filtered flux) - for now empty bands
-    '''
-    if compute_feats['m-feats-filtered']:
-
-        # Define feats to compute
-        feats_to_compute = [np.mean, np.max, np.min, np.std, skew, kurtosis]
-        num_bands = 6
-
-        func_names = [f'is_band_{i:d}' for i in range(num_bands)]
-        feat_names.extend(func_names)
-
-        # Allocate numpy placeholder for computed feats
-        mf_array = np.zeros(
-            shape=(oids.size, num_bands)
-        )
-
-        # Compute 'm' (flux) feats
-        for i, (oid_curves, detect_curves) in enumerate(zip(lcs[1], lcs[3])):
-            for k, (band, dband) in enumerate(zip(oid_curves, detect_curves)):
-                detections = dband.astype(bool)
-                if not np.any(detections):
-                    mf_array[i, k] = 0
-                else:
-                    mf_array[i, k] = 1
-
-        feat_arrays.append(mf_array)
 
     '''
     t-related feats (mjd, detected)
@@ -189,9 +163,9 @@ def atomic_worker(args):
     if compute_feats['d-feats']:
 
         # Define feats to compute
-        feats_to_compute = [np.mean, np.sum]
+        feats_to_compute = [np.mean]
         num_bands = 6
-        func_names = ['detected_'+n for n in ['mean', 'sum']]
+        func_names = ['detected_'+n for n in ['mean']]
         local_names = ['detected_'+n for n in ['mean']]
 
         for fn in local_names:
@@ -208,15 +182,15 @@ def atomic_worker(args):
                 for k, band in enumerate(oid_curves):
                     d_array[i, j * num_bands + k] = f(band)
 
-        d2_array = np.max(d_array[:,6:], axis=1, keepdims=True)
-        for i,e in enumerate(d2_array):
-            if e <= 4:
-                d2_array[i] = 10000
-            else:
-                d2_array[i] = 0
-        feat_names.extend(['detected_maxsum'])
+        # d2_array = np.max(d_array[:,6:], axis=1, keepdims=True)
+        # for i,e in enumerate(d2_array):
+        #     if e <= 4:
+        #         d2_array[i] = 10000
+        #     else:
+        #         d2_array[i] = 0
+        # feat_names.extend(['detected_maxsum'])
 
-        feat_arrays.extend([d_array[:,:6], d2_array])
+        feat_arrays.extend([d_array])
 
     '''
     e-feats (filtered flux_err)
@@ -311,28 +285,20 @@ def atomic_worker(args):
             mask = (ds[1:] * ds[:-1]) # Mask to compute slope between detected pts only
             mask = mask.astype(np.bool)
 
-            if np.sum(mask) <= 1: # Insufficient pts for slope computation
-                return np.zeros(6)
+            if np.sum(ds) <= 1: # 0 or 1 detected points are insufficient for slope computation
+                return np.zeros(3)
 
             s = (ms[1:]-ms[:-1])/(ts[1:]-ts[:-1])
 
-            # Inversions feat
-            masked_peak_index = np.argmax(ms[1:][mask])
 
-            inversions = 0
-            for i, s_ in enumerate(s[mask][1:]):
-                if s_ * s[mask][i] < 0:
-                    inversions += 1
-            inversions /= s[mask].shape[0]
-
-            return np.array([inversions, np.max(s), np.median(s), np.mean(s), np.std(s), skew(s)])
+            return np.array([np.mean(s), np.std(s), skew(s)])
 
 
         # Define feats to compute
         feats_to_compute = [slope_feats]
         num_bands = 6
         local_names = []
-        for fn in ['inversions', 'slope_max', 'slope_median', 'slope_mean', 'slope_std', 'slope_skew']:
+        for fn in ['slope_mean', 'slope_std', 'slope_skew']:
             local_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
         feat_names.extend(local_names)
@@ -353,67 +319,209 @@ def atomic_worker(args):
         feat_arrays.append(s_array)
 
     '''
-    Experimental feats
+    Hard rule feats
     '''
-    if compute_feats['exp']:
+    if compute_feats['hard-feats']:
 
-        num_feats = 6
+        num_feats = 1
 
         # Allocate numpy placeholder for computed feats
-        exp_array = np.zeros(
-            shape=(oids.size, 6)
+        h_array = np.zeros(
+            shape=(oids.size, 1)
         )
 
-        for exp_feat_name in ['exp_decay']:
-            feat_names.extend([exp_feat_name+f'_{i:d}' for i in range(6)])
-
-        # Define feats to compute
-        def exp_feats(ts, ms, ds):
-            '''
-            WIP - experimental cross band decay speed
-            '''
-
-            comp_feats = np.zeros(6)
-
-            for i, (t,m,d) in enumerate(zip(ts,ms,ds)):
-
-                if np.sum(d) <= 1: # If 0 or 1 measurements interval duration is 0
-                    continue
-
-                # Compute mjd groups
-                prev_detected = False
-                mjd_groups = []  # Final var holding all collect groups
-                curr_group = []  # Temp var to collect group info in loop
-                for ti, di in zip(t, d):
-                    if prev_detected and not bool(di):
-                        # Just finished group
-                        mjd_groups.append(curr_group)
-                        curr_group = []
-                        prev_detected = False
-                    if bool(di):
-                        # Going through/starting group
-                        curr_group.append(ti)
-                        prev_detected = True
-                # Append last group
-                if curr_group:
-                    mjd_groups.append(curr_group)
-
-                # Compute mean duration across groups
-                comp_feats[i] = np.mean([g[-1]-g[0] for g in mjd_groups])
-
-            return comp_feats
+        local_feat_names = ['hard_not_67']
+        # for j in range(6):
+        #     feat_names.extend([f'{fn}_{j:d}' for fn in local_feat_names])
+        feat_names.extend(local_feat_names)
 
         # Compute absolute decay values per band
         for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
-            exp_array[i, :] = exp_feats(oid_t_curves, oid_m_curves, oid_d_curves)
+            max_fluxes = []
+            for j, (t_band, m_band, d_band) in enumerate(zip(oid_t_curves, oid_m_curves, oid_d_curves)):
+                if np.sum(d_band) >= 1:
+                    max_f = np.max(m_band[d_band.astype(bool)])
+                    if max_f>0:
+                        max_fluxes.append(max_f)
+            if max_fluxes:
+                max_flux = np.max(max_fluxes)
+                m_band, d_band = oid_m_curves[1], oid_d_curves[1].astype(bool)
+                if any(d_band):
+                    rel_max_band_1 = np.max(m_band[d_band]) / max_flux
+                    if rel_max_band_1 >= 0.4:
+                        h_array[i] = 1
+                    else:
+                        h_array[i] = 0
+                else:
+                    h_array[i] = 0
+            else:
+                h_array[i] = 0 # May be 67 . . .
 
-        # Compute rel decay values
-        exp_array = exp_array / np.sum(exp_array, axis=1)[:, None]
 
-        feat_arrays.append(exp_array)
-    
-    
+        feat_arrays.append(h_array)
 
+    '''
+    Curve fitting feats
+    '''
+    if compute_feats['curve-feats']:
+
+        cn = [42,52,62,67,90]
+        num_feats = len(cn) # 5 sn curve models
+
+        # Allocate numpy placeholder for computed feats
+        c_array = np.zeros(
+            shape=(oids.size, num_feats)
+        )
+
+        local_feat_names = [f'sn_{cn_}' for cn_ in cn]
+        # for j in [2,3,4]:
+        #     feat_names.extend([f'{fn}_{j:d}' for fn in local_feat_names])
+        feat_names.extend(local_feat_names)
+
+        # Load sn models
+        with open('data/sn_models.pickle', 'rb') as handle:
+            sn_models = pickle.load(handle)
+        MAX_X = 150
+        MIN_X = -50
+        n_divs = MAX_X - MIN_X + 1
+        standard_time_stamps = np.linspace(MIN_X, MAX_X, n_divs)
+        WEIGHTS = np.ones(n_divs)
+        WEIGHTS[:50] = 0
+        WEIGHTS[75:] = 0.25
+
+        band_fit_array = np.zeros(
+            shape=(oids.size, num_feats * 3) #2 models, 3 bands
+        )
+
+        # Compute flux curve fit for bands 2,3,4 for each of the 5 models
+        # In the end 5 feats, representing overall curve fit to each of the 5 models
+        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
+            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
+
+                if j<2 or j==5:
+                    continue
+
+                adjusted_j = j - 2  # Since we started on band 2
+
+                # Filter series
+                if np.sum(d_band) > 1: # One point also excluded since it would have perfect fit
+
+                    # Filtered only
+                    m_band = m_band[d_band.astype(bool)]
+                    t_band = t_band[d_band.astype(bool)]
+                    e_band = e_band[d_band.astype(bool)]
+
+                    # Identify peak mjd and transpose series to peak at t=50
+                    t_band -= t_band[np.argmax(m_band)]
+
+                    # Normalize series
+                    m_band /= np.max(m_band)
+
+                    # Interpolate series
+                    m_band = np.interp(standard_time_stamps, t_band, m_band, left=-1, right=-1)
+                    e_band = np.interp(standard_time_stamps, t_band, e_band, left=-1, right=-1)
+
+                    # For each sn model for this band(2,3,4)
+                    for k, mod_num in enumerate(cn):
+
+                        # Load band model
+                        band_model = sn_models[mod_num][j]
+
+                        # Compute mean distance to model weighted by error and model weights
+                        mask = m_band != -1 # Pick interpolated pts, not extrapolated pts
+
+                        mse = (band_model[mask] - m_band[mask])**2 * WEIGHTS[mask] / e_band[mask]
+
+                        band_fit_array[i, adjusted_j*num_feats + k] = np.mean(mse)
+
+                else:
+                    # If band non-existant fit_dist = -1 to all models (used later to exclude from global fit score)
+                    band_fit_array[i, adjusted_j*num_feats:adjusted_j*num_feats+num_feats] = -1
+
+        # Aggregate scores across bands
+        for feat_num in range(num_feats):
+            for jjj, line in enumerate(band_fit_array):
+                model_scores = line[[feat_num, feat_num+num_feats, feat_num+num_feats*2]]
+                # Leave -1 out of mean
+                if np.any(model_scores!=-1):
+                    c_array[jjj,feat_num] = np.mean(model_scores[model_scores!=-1])
+                else:
+                    c_array[jjj, feat_num] = 100
+
+        feat_arrays.append(c_array)
+
+    '''
+    Linreg feats
+    '''
+    if compute_feats['linreg-feats']:
+
+        linreg_feats = ['back', 'front']
+        lin_feats = ['mean', 'std']
+        num_feats = len(linreg_feats) # Back and front linreg fits
+
+        # Allocate numpy placeholder for computed feats
+        linreg_array = np.zeros(
+            shape=(oids.size, num_feats * len(lin_feats))
+        )
+
+        local_feat_names = [f'linreg_b1_{cn_}' for cn_ in linreg_feats]
+        for j in lin_feats:
+            feat_names.extend([f'{fn}_{j}' for fn in local_feat_names])
+        # feat_names.extend(local_feat_names)
+
+        # Band info array for later collapse
+        linreg_bands = np.zeros(
+            shape=(oids.size, num_feats * 6)  # six bands per feat
+        )
+
+        # Compute simple b1 from linreg from normalized peak
+        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
+            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
+
+                # Filtered only
+                m_band = m_band[d_band.astype(bool)]
+                t_band = t_band[d_band.astype(bool)]
+                e_band = e_band[d_band.astype(bool)]
+
+                if len(t_band) >= 2:  # Need 2 points at least for linreg
+                    # Identify peak mjd and transpose series to mjd 0 at peak
+                    peak_loc = np.argmax(m_band)
+                    t_band -= t_band[peak_loc]
+
+                    # Normalize series and remove unitary bias
+                    m_band /= m_band[peak_loc]
+                    m_band -= 1
+                else:
+                    # If band non-existent fit is impossible ie. nan
+                    linreg_bands[i, j*num_feats:j*num_feats+num_feats] = np.nan
+
+                for k, ft in enumerate(linreg_feats):
+
+                        if ft == 'back':
+                            mask = t_band <= 0
+                        elif ft == 'front':
+                            mask = t_band >= 0
+                        else:
+                            raise ValueError('Unknown linreg feature type')
+
+                        t_band_partial = t_band[mask]
+                        m_band_partial = m_band[mask]
+
+                        if len(t_band_partial) >= 2: # Need 2 points at least for linreg
+                            beta_1 = 1 / np.dot(t_band_partial, t_band_partial) * np.dot(t_band_partial, m_band_partial)
+                        else:
+                            beta_1 = np.nan
+
+                        linreg_bands[i, j*num_feats + k] = beta_1
+
+        # Aggregate scores across bands
+        # linreg_bands = linreg_bands[:,4:-2]
+        for feat_num in range(num_feats):
+            linreg_array[:,feat_num] = np.nanmean(linreg_bands[:,feat_num::num_feats], axis=1)
+            linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
+
+
+        feat_arrays.append(linreg_array)
 
     '''
     Aggregate all feats and wrap up
@@ -483,11 +591,11 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
         pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-set_str = 'training'
+set_str = 'test'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r3_d-feats_v2.h5',
+    save_name=set_str+'_set_feats_r3_m-feats_v3.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )

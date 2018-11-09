@@ -157,17 +157,17 @@ train_feats_list = [
     'data/training_feats/training_set_feats_r3_m-feats_weighted_v1.h5',
     'data/training_feats/training_set_feats_r3_t-feats_v1.h5',
     'data/training_feats/training_set_feats_r3_d-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_e-feats_v1.h5',
     'data/training_feats/training_set_feats_r3_slope-feats_v1.h5',
+    'data/training_feats/training_set_feats_r3_e-feats_v1.h5',
     # 'data/training_feats/training_set_feats_r2_v7.h5',
     # 'data/training_feats/training_set_feats_r2_slope_v2.h5',
     # 'data/training_feats/training_set_feats_r2_err_v1.h5',
     # 'data/training_feats/training_set_feats_r2_exp.h5',
 ]
 test_feats_list = [
-    'data/test_feats/test_set_feats_std.h5'
-    # 'data/test_feats/test_set_feats_r2_v7.h5',
-    # 'data/test_feats/test_set_feats_r2_slope_v2.h5',
+    # 'data/test_feats/test_set_feats_std.h5'
+    'data/test_feats/test_set_feats_r2_v7.h5',
+    'data/test_feats/test_set_feats_r2_slope_v2.h5',
 ]
 
 train, test, y_tgt, train_cols = utils.prep_data(train_feats_list, test_feats_list)
