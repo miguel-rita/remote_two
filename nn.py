@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import confusion_matrix
 
-from utils.misc_utils import plot_confusion_matrix
+from utils.misc_utils import plot_confusion_matrix, save_submission
 
 # Seed
 from numpy.random import seed
@@ -27,6 +27,11 @@ class MlpModel:
 
     # Constructor
     def __init__(self, train, test, y_tgt, selected_cols, output_dir):
+
+        # Input control
+        if train is None:
+            raise ValueError('Error initializing MLP - must provide at least a training set')
+        is_train_only = True if test is None else False
 
         # dataset
         self.train = train
@@ -85,10 +90,11 @@ class MlpModel:
         ss.fit(self.x_all)
         self.x_all = ss.transform(self.x_all)
 
-        subset_test = self.test[self.selected_cols].replace([-np.inf, np.inf], np.nan)
-        subset_test.fillna(train_mean, inplace=True)
-        self.x_test = subset_test.values
-        self.x_test = ss.transform(self.x_test)
+        if not is_train_only:
+            subset_test = self.test[self.selected_cols].replace([-np.inf, np.inf], np.nan)
+            subset_test.fillna(train_mean, inplace=True)
+            self.x_test = subset_test.values
+            self.x_test = ss.transform(self.x_test)
 
     # Loss-related methods
     def weighted_average_crossentropy_backend(self, y_true, y_pred):
@@ -168,44 +174,6 @@ class MlpModel:
         nn_names.sort()
         self.models.extend([load_model(os.getcwd() + '/' + models_rel_dir + f'/fold{i}__' + n.split('__')[-1]) for i,n in enumerate(nn_names)])
 
-    # Other methods
-    def save_submission(self, y_test, sub_name, rs_bins, nrows=None):
-
-        # Get submission header
-        col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
-        num_classes = len(col_names) - 1
-
-        # Get test ids
-        object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows,
-                                 usecols=['object_id']).values.astype(int)
-        num_ids = object_ids.size
-
-        # Class 99 adjustment - remember these are conditional probs on redshift
-        c99_bin0_prob = 0.02
-        c99_bin1_9_prob = 0.14
-
-        c99_probs = np.zeros((y_test.shape[0], 1))
-        c99_probs[rs_bins == 0] = c99_bin0_prob
-        c99_probs[rs_bins != 0] = c99_bin1_9_prob
-        y_test[rs_bins == 0] *= (1 - c99_bin0_prob)
-        y_test[rs_bins != 0] *= (1 - c99_bin1_9_prob)
-
-        sub = np.hstack([object_ids, y_test, c99_probs])
-
-        h = ''
-        for s in col_names:
-            h += s + ','
-        h = h[:-1]
-
-        # Write to file
-        np.savetxt(
-            fname=sub_name,
-            X=sub,
-            fmt=['%d'] + ['%.6f'] * num_classes,
-            delimiter=',',
-            header=h,
-            comments='',
-        )
     def build_model(self, layer_dims, dropout_rate, activation='relu'):
         # create model
         model = Sequential()
@@ -257,7 +225,7 @@ class MlpModel:
             '''
 
             # Instantiate model
-            nn = self.build_model(layers_dims=params['layer_dims'], dropout_rate=params['dropout_rate'], activation='relu')
+            nn = self.build_model(layer_dims=params['layer_dims'], dropout_rate=params['dropout_rate'], activation='relu')
         
             # Compile model
             nn.compile(
@@ -320,7 +288,8 @@ class MlpModel:
         '''
 
         y_oof = np.zeros(self.y_tgt_oh.shape)
-        y_test = np.zeros((self.test.shape[0], self.weights.size))
+        if predict_test:
+            y_test = np.zeros((self.test.shape[0], self.weights.size))
 
         # Setup stratified CV
         num_folds = 5
@@ -356,7 +325,7 @@ class MlpModel:
                 test_preds.to_hdf(self.output_dir + f'{final_name}_test.h5', key='w')
 
         if produce_sub:
-            self.save_submission(y_test, f'./subs/{final_name}.csv', rs_bins=self.test['rs_bin'].values)
+            save_submission(y_test, f'./subs/{final_name}.csv', rs_bins=self.test['rs_bin'].values)
 
         if save_confusion:
             y_preds = np.argmax(y_oof, axis=1)

@@ -9,6 +9,7 @@ import multiprocessing as mp
 import tqdm, glob, time, gc, pickle
 from scipy.stats import kurtosis, skew
 import cesium.time_series, cesium.featurize
+from itertools import combinations
 
 def atomic_worker(args):
 
@@ -25,11 +26,12 @@ def atomic_worker(args):
         'm-feats'            : bool(0),
         't-feats'            : bool(0),
         'd-feats'            : bool(0),
+        'peak-feats'         : bool(1),
+        'linreg-feats'       : bool(0),
         'e-feats'            : bool(0),
-        'cesium-feats'       : bool(1),
+        'cesium-feats'       : bool(0),
         'slope-feats'        : bool(0),
         'curve-feats'        : bool(0),
-        'linreg-feats'       : bool(0),
     }
 
     '''
@@ -194,6 +196,131 @@ def atomic_worker(args):
         # feat_names.extend(['detected_maxsum'])
 
         feat_arrays.extend([d_array])
+
+    '''
+    Linreg feats
+    '''
+    if compute_feats['peak-feats']:
+
+        # peak_feats = ['max_delta_peak']
+        # feat_names.extend([f'{fn}' for fn in peak_feats])
+
+        # Temp array for later collapse
+        peak_array_bands_max = np.zeros(
+            shape=(oids.size, 6)  # six bands per feat
+        )
+        peak_array_bands_mean = np.zeros(
+            shape=(oids.size, 6)  # six bands per feat
+        )
+
+        # Compute simple b1 from linreg from normalized peak
+        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
+            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
+
+                # Filtered only
+                m_band = m_band[d_band.astype(bool)]
+                t_band = t_band[d_band.astype(bool)]
+                e_band = e_band[d_band.astype(bool)]
+
+                if len(t_band) > 0:  # Need at least 1 point to compute peak
+                    peak_array_bands_max[i, j] = t_band[np.argmax(m_band)]
+                    peak_array_bands_mean[i, j] = np.mean(t_band)
+                else:
+                    peak_array_bands_max[i, j] = np.nan
+                    peak_array_bands_mean[i, j] = np.nan
+
+        #peak_array_bands = peak_array_bands[:,2:5]
+        #peak_array = np.nanmax(peak_array_bands, axis=1, keepdims=True) - np.nanmin(peak_array_bands, axis=1, keepdims=True)
+
+        peak_array_max = np.zeros(shape=(oids.size, 15))
+        peak_array_mean = np.zeros(shape=(oids.size, 15))
+
+        # Compute cross band max peak mjd deltas
+        for i, (band_a, band_b) in enumerate(combinations(range(6), 2)):
+            peak_array_max[:, i] = peak_array_bands_max[:,band_a] - peak_array_bands_max[:,band_b]
+            peak_array_mean[:, i] = peak_array_bands_mean[:,band_a] - peak_array_bands_mean[:,band_b]
+
+            feat_names.append(f'mjd_peak_dist_max_{band_a:d}_{band_b:d}')
+            feat_names.append(f'mjd_peak_dist_mean_{band_a:d}_{band_b:d}')
+
+        feat_arrays.extend([peak_array_max, peak_array_mean])
+
+    '''
+    Linreg feats
+    '''
+    if compute_feats['linreg-feats']:
+
+        linreg_feats = ['back', 'front']
+        lin_feats = ['mean']#, 'std']
+        num_feats = len(linreg_feats) # Back and front linreg fits
+
+        # Allocate numpy placeholder for computed feats
+        linreg_array = np.zeros(
+            shape=(oids.size, num_feats * len(lin_feats))
+        )
+
+
+        local_feat_names = [f'linreg_b1_{cn_}' for cn_ in linreg_feats]
+        for j in lin_feats:
+            feat_names.extend([f'{fn}_{j}' for fn in local_feat_names])
+
+        # Band info array for later collapse
+        linreg_bands = np.zeros(
+            shape=(oids.size, num_feats * 6)  # six bands per feat
+        )
+
+        # Compute simple b1 from linreg from normalized peak
+        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
+            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
+
+                # Filtered only
+                m_band = m_band[d_band.astype(bool)]
+                t_band = t_band[d_band.astype(bool)]
+                e_band = e_band[d_band.astype(bool)]
+
+                if len(t_band) >= 2:  # Need 2 points at least for linreg
+                    # Identify peak mjd and transpose series to mjd 0 at peak
+                    peak_loc = np.argmax(m_band)
+                    t_band -= t_band[peak_loc]
+
+                    # Normalize series and remove unitary bias
+                    m_band /= m_band[peak_loc]
+                    e_band /= m_band[peak_loc]
+                    m_band -= 1
+                else:
+                    # If band non-existent fit is impossible ie. nan
+                    linreg_bands[i, j*num_feats:j*num_feats+num_feats] = np.nan
+
+                for k, ft in enumerate(linreg_feats):
+
+                        if ft == 'back':
+                            mask = t_band <= 0
+                        elif ft == 'front':
+                            mask = t_band >= 0
+                        else:
+                            raise ValueError('Unknown linreg feature type')
+
+                        # Incorporate error
+                        # t_band /= e_band
+                        # m_band /= e_band
+
+                        t_band_partial = t_band[mask]
+                        m_band_partial = m_band[mask]
+
+                        if len(t_band_partial) >= 2: # Need 2 points at least for linreg
+                            beta_1 = 1 / np.dot(t_band_partial, t_band_partial) * np.dot(t_band_partial, m_band_partial)
+                        else:
+                            beta_1 = np.nan
+
+                        linreg_bands[i, j*num_feats + k] = beta_1
+
+        # Aggregate scores across bands
+        # linreg_bands = linreg_bands[:,4:-2]
+        for feat_num in range(num_feats):
+            linreg_array[:,feat_num] = np.nanmean(linreg_bands[:,feat_num::num_feats], axis=1)
+            #linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
+
+        feat_arrays.append(linreg_array)
 
     '''
     e-feats (filtered flux_err)
@@ -411,83 +538,6 @@ def atomic_worker(args):
         feat_arrays.append(c_array)
 
     '''
-    Linreg feats
-    '''
-    if compute_feats['linreg-feats']:
-
-        linreg_feats = ['back', 'front']
-        lin_feats = ['mean']#, 'std']
-        num_feats = len(linreg_feats) # Back and front linreg fits
-
-        # Allocate numpy placeholder for computed feats
-        linreg_array = np.zeros(
-            shape=(oids.size, num_feats * len(lin_feats))
-        )
-
-
-        local_feat_names = [f'linreg_b1_{cn_}' for cn_ in linreg_feats]
-        for j in lin_feats:
-            feat_names.extend([f'{fn}_{j}' for fn in local_feat_names])
-
-        # Band info array for later collapse
-        linreg_bands = np.zeros(
-            shape=(oids.size, num_feats * 6)  # six bands per feat
-        )
-
-        # Compute simple b1 from linreg from normalized peak
-        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
-            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
-
-                # Filtered only
-                m_band = m_band[d_band.astype(bool)]
-                t_band = t_band[d_band.astype(bool)]
-                e_band = e_band[d_band.astype(bool)]
-
-                if len(t_band) >= 2:  # Need 2 points at least for linreg
-                    # Identify peak mjd and transpose series to mjd 0 at peak
-                    peak_loc = np.argmax(m_band)
-                    t_band -= t_band[peak_loc]
-
-                    # Normalize series and remove unitary bias
-                    m_band /= m_band[peak_loc]
-                    e_band /= m_band[peak_loc]
-                    m_band -= 1
-                else:
-                    # If band non-existent fit is impossible ie. nan
-                    linreg_bands[i, j*num_feats:j*num_feats+num_feats] = np.nan
-
-                for k, ft in enumerate(linreg_feats):
-
-                        if ft == 'back':
-                            mask = t_band <= 0
-                        elif ft == 'front':
-                            mask = t_band >= 0
-                        else:
-                            raise ValueError('Unknown linreg feature type')
-
-                        # Incorporate error
-                        # t_band /= e_band
-                        # m_band /= e_band
-
-                        t_band_partial = t_band[mask]
-                        m_band_partial = m_band[mask]
-
-                        if len(t_band_partial) >= 2: # Need 2 points at least for linreg
-                            beta_1 = 1 / np.dot(t_band_partial, t_band_partial) * np.dot(t_band_partial, m_band_partial)
-                        else:
-                            beta_1 = np.nan
-
-                        linreg_bands[i, j*num_feats + k] = beta_1
-
-        # Aggregate scores across bands
-        # linreg_bands = linreg_bands[:,4:-2]
-        for feat_num in range(num_feats):
-            linreg_array[:,feat_num] = np.nanmean(linreg_bands[:,feat_num::num_feats], axis=1)
-            #linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
-
-        feat_arrays.append(linreg_array)
-
-    '''
     Aggregate all feats and wrap up
     '''
 
@@ -557,7 +607,7 @@ set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r3_cesium-feats_v5.h5',
+    save_name=set_str+'_set_feats_r4_peak-feats_v2_30maxmean.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )

@@ -29,7 +29,13 @@ subs_rs_probe/*
 models/*
 !models/.dir.txt
 
+level_1_preds/*
+level_2_preds/*
+confusion/*
+imps/*
+
 utils/__py*
 .ipynb*
 .DS_Store
 .idea/*
+__py*

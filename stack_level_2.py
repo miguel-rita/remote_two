@@ -9,19 +9,23 @@ def main():
     '''
 
     level_1_feats_train = [
-        'level_1_preds/lgbm_v4.4_exp_decrease90_weight_0.5793_oof.h5',
-        'level_1_preds/mlp_v4.3_0.8938_oof.h5',
+        'level_1_preds/lgbm_v4.5_0.5800_oof.h5',
+        'level_1_preds/lgbm_v4.5_0.5810_oof.h5',
+        'level_1_preds/lgbm_v4.5_0.5844_oof.h5',
+        'level_1_preds/lgbm_v4.5_0.5869_oof.h5',
+        'level_1_preds/mlp_v4.5_0.8414_oof.h5',
+        'level_1_preds/mlp_v4.5_0.8545_oof.h5',
 
     ]
     level_1_feats_test = [
-        'level_1_preds/lgbm_v4.4_exp_decrease90_weight_0.5793_test.h5',
-        'level_1_preds/mlp_v4.3_0.8938_test.h5',
+        # 'level_1_preds/lgbm_v4.4_exp_decrease90_weight_0.5793_test.h5',
+        # 'level_1_preds/mlp_v4.3_0.8938_test.h5',
     ]
 
     train, test, y_tgt, selected_cols = utils.prep_data([], [], only_meta=True)
 
     train = concat_feats(level_1_feats_train)
-    test = concat_feats(level_1_feats_test)
+    #test = concat_feats(level_1_feats_test)
 
     selected_cols = [c for c in train.columns if c != 'object_id']
 
@@ -40,7 +44,7 @@ def main():
 
     lgbm_model_level_2 = LgbmModel(
         train=train,
-        test=test,
+        test=None,
         y_tgt=y_tgt,
         selected_cols=selected_cols,
         output_dir='./level_2_preds/',

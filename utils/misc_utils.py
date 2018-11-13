@@ -44,6 +44,44 @@ def save_importances(imps_, filename_):
     plt.savefig(filename_+'.png')
     plt.clf()
 
+def save_submission(self, y_test, sub_name, rs_bins, nrows=None):
+
+    # Get submission header
+    col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
+    num_classes = len(col_names) - 1
+
+    # Get test ids
+    object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows,
+                             usecols=['object_id']).values.astype(int)
+    num_ids = object_ids.size
+
+    # Class 99 adjustment - remember these are conditional probs on redshift
+    c99_bin0_prob = 0.02
+    c99_bin1_9_prob = 0.14
+
+    c99_probs = np.zeros((y_test.shape[0], 1))
+    c99_probs[rs_bins == 0] = c99_bin0_prob
+    c99_probs[rs_bins != 0] = c99_bin1_9_prob
+    y_test[rs_bins == 0] *= (1 - c99_bin0_prob)
+    y_test[rs_bins != 0] *= (1 - c99_bin1_9_prob)
+
+    sub = np.hstack([object_ids, y_test, c99_probs])
+
+    h = ''
+    for s in col_names:
+        h += s + ','
+    h = h[:-1]
+
+    # Write to file
+    np.savetxt(
+        fname=sub_name,
+        X=sub,
+        fmt=['%d'] + ['%.6f'] * num_classes,
+        delimiter=',',
+        header=h,
+        comments='',
+    )
+
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):
     '''
     Extract lightcurves from a chunk of data and store them on disk in tsfresh ready format
