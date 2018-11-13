@@ -3,7 +3,7 @@ import numpy as np
 import os, pickle
 from functools import reduce
 
-def concat_feats(feat_set_list, init):
+def concat_feats(feat_set_list, init=None):
     '''
     Reads and concatenates already computed feats to metadata
 
@@ -13,9 +13,12 @@ def concat_feats(feat_set_list, init):
     '''
 
     feat_dfs = [pd.read_hdf(path, mode='r') for path in feat_set_list]
-    return reduce(lambda l,r : pd.merge(l,r,how='outer',on='object_id'), feat_dfs, init)
+    if init is not None:
+        return reduce(lambda l,r : pd.merge(l,r,how='outer',on='object_id'), feat_dfs, init)
+    else:
+        return reduce(lambda l,r : pd.merge(l,r,how='outer',on='object_id'), feat_dfs)
 
-def prep_data(train_feats_list, test_feats_list):
+def prep_data(train_feats_list, test_feats_list, only_meta=False):
     '''
     Load and preprocess train and test data and metadata
     :return: tuple, as follows: (train dataframe (no target), full test dataframe,
@@ -68,18 +71,22 @@ def prep_data(train_feats_list, test_feats_list):
     Data processing
     '''
 
-    train = concat_feats(train_feats_list, meta_train)
-    test = concat_feats(test_feats_list, meta_test)
+    if not only_meta:
+        train = concat_feats(train_feats_list, meta_train)
+        test = concat_feats(test_feats_list, meta_test)
 
-    # Select feat subset
-    feat_subset = []
-    for feat_list in train_feats_list:
-        with open(feat_list.split('.h5')[0] + '.pkl', 'rb') as f:
-            feat_subset.extend(pickle.load(f))
+        # Select feat subset
+        feat_subset = []
+        for feat_list in train_feats_list:
+            with open(feat_list.split('.h5')[0] + '.pkl', 'rb') as f:
+                feat_subset.extend(pickle.load(f))
 
-    if 'object_id' in feat_subset:
-        feat_subset.remove('object_id')
+        if 'object_id' in feat_subset:
+            feat_subset.remove('object_id')
 
-    train_cols.extend(feat_subset)
+        train_cols.extend(feat_subset)
+
+    else:
+        train, test = meta_train, meta_test
 
     return train, test, y_tgt, train_cols

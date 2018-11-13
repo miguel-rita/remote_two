@@ -18,26 +18,19 @@ def atomic_worker(args):
         lcs = pickle.load(f)
     oids = np.load(oids_dir).astype(np.uint32)
 
-
-
-
     # Feat computation controls
     feat_names = []
     feat_arrays = []
     compute_feats = {
-        'm-feats'            : bool(1),
+        'm-feats'            : bool(0),
         't-feats'            : bool(0),
         'd-feats'            : bool(0),
         'e-feats'            : bool(0),
-        'cesium-feats'       : bool(0),
+        'cesium-feats'       : bool(1),
         'slope-feats'        : bool(0),
-        'hard-feats'         : bool(0),
         'curve-feats'        : bool(0),
         'linreg-feats'       : bool(0),
     }
-
-
-
 
     '''
     m-feats (flux)
@@ -57,13 +50,17 @@ def atomic_worker(args):
         )
 
         # Compute 'm' (flux) feats
-        for i,(flux_curves, err_curves) in enumerate(zip(lcs[1], lcs[2])):
+        for i,(flux_curves, err_curves, dect_curves) in enumerate(zip(lcs[1], lcs[2], lcs[3])):
             for j,f in enumerate(feats_to_compute):
-                for k,(flux_curve, err_curve) in enumerate(zip(flux_curves, err_curves)):
+
+                for k,(flux_curve, err_curve, dect_curve) in enumerate(zip(flux_curves, err_curves, dect_curves)):
+
                     if f == np.average:
-                        m_array[i, j * num_bands + k] = f(flux_curve, weights=1/err_curve)
+                        res = f(flux_curve, weights=1/err_curve)
                     else:
-                        m_array[i, j * num_bands + k] = f(flux_curve)
+                        res = f(flux_curve)
+
+                    m_array[i, j * num_bands + k] = res
 
         feat_arrays.append(m_array)
 
@@ -72,9 +69,16 @@ def atomic_worker(args):
         for fn in cross_band_names:
             feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
+        # # For bands 2-4
+        # cross_band_names = ['red_cross_band_flux_mean_contrib', 'red_cross_band_flux_max_contrib']
+        # for fn in cross_band_names:
+        #     feat_names.extend([f'{fn}_{i:d}' for i in [2,3,4]])
+
         mc_array = np.hstack([
             m_array[:,:6] / np.sum(m_array[:,:6], axis=1)[:,None],
             m_array[:,6:12] / np.sum(m_array[:,6:12], axis=1)[:,None],
+            # m_array[:,2:5] / np.sum(m_array[:,2:5], axis=1)[:,None],
+            # m_array[:,8:11] / np.sum(m_array[:,8:11], axis=1)[:,None],
         ])
         feat_arrays.append(mc_array)
 
@@ -140,7 +144,6 @@ def atomic_worker(args):
                 n_gps,
                 mean_gp,
             ])
-
 
         feats_to_compute = [detected_feats]
         feat_names.extend([
@@ -246,11 +249,11 @@ def atomic_worker(args):
         cesium_feat_names = [
             'qso_log_chi2_qsonu',
             'qso_log_chi2nuNULL_chi2nu',
-            'stetson_j',
-            'stetson_k',
-            'amplitude',
-            'max_slope',
-            'median_absolute_deviation',
+            # 'stetson_j',
+            # 'stetson_k',
+            # 'amplitude',
+            # 'max_slope',
+            # 'median_absolute_deviation',
         ]
 
         num_bands = 6
@@ -293,7 +296,6 @@ def atomic_worker(args):
 
             return np.array([np.mean(s), np.std(s), skew(s)])
 
-
         # Define feats to compute
         feats_to_compute = [slope_feats]
         num_bands = 6
@@ -317,48 +319,6 @@ def atomic_worker(args):
                     s_array[i, j*_nfeats:j*_nfeats+_nfeats] = fts
 
         feat_arrays.append(s_array)
-
-    '''
-    Hard rule feats
-    '''
-    if compute_feats['hard-feats']:
-
-        num_feats = 1
-
-        # Allocate numpy placeholder for computed feats
-        h_array = np.zeros(
-            shape=(oids.size, 1)
-        )
-
-        local_feat_names = ['hard_not_67']
-        # for j in range(6):
-        #     feat_names.extend([f'{fn}_{j:d}' for fn in local_feat_names])
-        feat_names.extend(local_feat_names)
-
-        # Compute absolute decay values per band
-        for i, (oid_t_curves, oid_m_curves, oid_d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[3])):
-            max_fluxes = []
-            for j, (t_band, m_band, d_band) in enumerate(zip(oid_t_curves, oid_m_curves, oid_d_curves)):
-                if np.sum(d_band) >= 1:
-                    max_f = np.max(m_band[d_band.astype(bool)])
-                    if max_f>0:
-                        max_fluxes.append(max_f)
-            if max_fluxes:
-                max_flux = np.max(max_fluxes)
-                m_band, d_band = oid_m_curves[1], oid_d_curves[1].astype(bool)
-                if any(d_band):
-                    rel_max_band_1 = np.max(m_band[d_band]) / max_flux
-                    if rel_max_band_1 >= 0.4:
-                        h_array[i] = 1
-                    else:
-                        h_array[i] = 0
-                else:
-                    h_array[i] = 0
-            else:
-                h_array[i] = 0 # May be 67 . . .
-
-
-        feat_arrays.append(h_array)
 
     '''
     Curve fitting feats
@@ -456,7 +416,7 @@ def atomic_worker(args):
     if compute_feats['linreg-feats']:
 
         linreg_feats = ['back', 'front']
-        lin_feats = ['mean', 'std']
+        lin_feats = ['mean']#, 'std']
         num_feats = len(linreg_feats) # Back and front linreg fits
 
         # Allocate numpy placeholder for computed feats
@@ -464,10 +424,10 @@ def atomic_worker(args):
             shape=(oids.size, num_feats * len(lin_feats))
         )
 
+
         local_feat_names = [f'linreg_b1_{cn_}' for cn_ in linreg_feats]
         for j in lin_feats:
             feat_names.extend([f'{fn}_{j}' for fn in local_feat_names])
-        # feat_names.extend(local_feat_names)
 
         # Band info array for later collapse
         linreg_bands = np.zeros(
@@ -490,6 +450,7 @@ def atomic_worker(args):
 
                     # Normalize series and remove unitary bias
                     m_band /= m_band[peak_loc]
+                    e_band /= m_band[peak_loc]
                     m_band -= 1
                 else:
                     # If band non-existent fit is impossible ie. nan
@@ -503,6 +464,10 @@ def atomic_worker(args):
                             mask = t_band >= 0
                         else:
                             raise ValueError('Unknown linreg feature type')
+
+                        # Incorporate error
+                        # t_band /= e_band
+                        # m_band /= e_band
 
                         t_band_partial = t_band[mask]
                         m_band_partial = m_band[mask]
@@ -518,8 +483,7 @@ def atomic_worker(args):
         # linreg_bands = linreg_bands[:,4:-2]
         for feat_num in range(num_feats):
             linreg_array[:,feat_num] = np.nanmean(linreg_bands[:,feat_num::num_feats], axis=1)
-            linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
-
+            #linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
 
         feat_arrays.append(linreg_array)
 
@@ -555,12 +519,10 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
 
     np.warnings.filterwarnings('ignore')
 
-
     # Get paths to lcs and respective oids
     atomic_args = []
     for lcs_path, oids_path in zip(sorted(glob.glob(light_curves_dir + '/*.pkl')), sorted(glob.glob(light_curves_dir + '/*.npy'))):
         atomic_args.append((lcs_path, oids_path))
-
 
     # Dispatch work to processes, one batch at a time
     batch_split_indexes = np.array_split(np.arange(len(atomic_args)), n_batches)
@@ -591,11 +553,11 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
         pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-set_str = 'test'
+set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r3_m-feats_v3.h5',
+    save_name=set_str+'_set_feats_r3_cesium-feats_v5.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )

@@ -7,16 +7,13 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import itertools
 
-def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
+def plot_confusion_matrix(cm, classes, filename_, normalize=False, title='Confusion matrix', cmap=plt.cm.Blues):
     """
     This function prints and plots the confusion matrix.
     Normalization can be applied by setting `normalize=True`.
     """
     if normalize:
         cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
-        print("Normalized confusion matrix")
-    else:
-        print('Confusion matrix, without normalization')
 
     plt.figure(figsize=(10, 8))
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
@@ -35,16 +32,16 @@ def plot_confusion_matrix(cm, classes, normalize=False, title='Confusion matrix'
 
     plt.ylabel('True label')
     plt.xlabel('Predicted label')
-    plt.savefig('confusion.png')
+    plt.savefig(f'{filename_}.png')
     plt.clf()
 
-def save_importances(imps_):
+def save_importances(imps_, filename_):
     mean_gain = imps_[['gain', 'feat']].groupby('feat').mean().reset_index()
     mean_gain.index.name = 'feat'
     plt.figure(figsize=(6, 17))
     sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
     plt.tight_layout()
-    plt.savefig('imps.png')
+    plt.savefig(filename_+'.png')
     plt.clf()
 
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):

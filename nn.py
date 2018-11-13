@@ -1,348 +1,365 @@
 import numpy as np
 import pandas as pd
 
-import time, datetime, os, tqdm
+import time, datetime, os, glob
 
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import Dense, BatchNormalization, Dropout
 from keras.callbacks import EarlyStopping
-from keras import optimizers
-from keras import backend as K
+from keras import optimizers, backend as K
 
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import confusion_matrix
 
-import utils.preprocess as utils
-from utils.misc_utils import plot_confusion_matrix, save_importances
+from utils.misc_utils import plot_confusion_matrix
 
 # Seed
 from numpy.random import seed
 from tensorflow import set_random_seed
-seed(1)
-set_random_seed(1)
 
 '''
-Auxiliary funcs definitions
+MLP Class definition
 '''
 
-def build_model(dropout_rate, activation='relu'):
+class MlpModel:
 
-    # create model
-    model = Sequential()
-    model.add(Dense(400, input_dim=x_all.shape[1], activation=activation))
-    model.add(BatchNormalization())
-    model.add(Dropout(dropout_rate))
+    # Constructor
+    def __init__(self, train, test, y_tgt, selected_cols, output_dir):
 
-    model.add(Dense(40, activation=activation))
-    model.add(BatchNormalization())
-    model.add(Dropout(dropout_rate))
+        # dataset
+        self.train = train
+        self.test = test
+        self.y_tgt = y_tgt
+        self.selected_cols = selected_cols
 
-    model.add(Dense(14, activation='softmax'))
-    return model
+        # other params
+        self.output_dir = output_dir
+        self.class_weights_dict = {
+            # 99 : 2.002408,
+            95: 1.001044,
+            92: 1.001044,
+            90: 1.001044,
+            88: 1.001044,
+            67: 1.001044,
+            65: 1.001044,
+            64: 2.007104,
+            62: 1.001044,
+            53: 1.000000,
+            52: 1.001044,
+            42: 1.001044,
+            16: 1.001044,
+            15: 2.001886,
+            6: 1.001044,
+        }
+        self.class_codes = np.unique(list(self.class_weights_dict.keys()))
+        self.class_weights = {i: self.class_weights_dict[c] for i, c in enumerate(self.class_codes)}
+        self.label_encode = {c: i for i, c in enumerate(self.class_codes)}
+        self.weights = np.array([self.class_weights[i] for i in range(len(self.class_weights))])
 
-def weighted_average_crossentropy_backend(y_true, y_pred):
-    '''
-    Custom defined weight multiclass cross entropy
-    :param y_true: OHE targets
-    :param y_pred: 2D array of probabilities, summing to 1 per row (across classes)
-    :return: (float) Calculated loss
-    '''
+        # Encode target labels
+        for i, tgt in enumerate(self.y_tgt):
+            self.y_tgt[i] = self.label_encode[tgt]
 
-    # In ascending class order : 6,15,...,92,95
-    _weights = K.constant([
-        1.001044,
-        2.001886,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.,
-        1.001044,
-        2.007104,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-    ], dtype='float32')
+        # Setup OH target
+        self.y_tgt_oh = np.eye(len(self.weights))[self.y_tgt]
 
-    # Clip preds for log safety
-    y_pred = K.log(K.clip(y_pred, 1e-15, 1 - 1e-15))
+        # Compute sample weights
+        self.sample_weights = compute_sample_weight('balanced', self.y_tgt)
 
-    # Compute loss
-    class_avg_losses = K.sum(y_true * y_pred, axis=0) / K.sum(y_true, axis=0)
-    loss = -K.sum(class_avg_losses * _weights) / K.sum(_weights)
+        self.models = []
+        self.fold_val_losses = []
 
-    return loss
+        '''
+        Input scaling and additional preprocess for nn
+        '''
 
-def weighted_average_crossentropy_numpy(y_true, y_pred):
-    '''
-    Custom defined weight multiclass cross entropy
-    :param y_true: OHE targets
-    :param y_pred: 2D array of probabilities, summing to 1 per row (across classes)
-    :return: (float) Calculated loss
-    '''
+        # Take care of NAs (mostly from features)
+        subset_train = self.train[self.selected_cols].replace([-np.inf, np.inf], np.nan)
+        train_mean = subset_train.mean(axis=0)
+        subset_train.fillna(train_mean, inplace=True)
+        self.x_all = subset_train.values
 
-    # In ascending class order : 6,15,...,92,95
-    _weights = np.array([
-        1.001044,
-        2.001886,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.,
-        1.001044,
-        2.007104,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-        1.001044,
-    ], dtype='float32')
+        ss = StandardScaler()
+        ss.fit(self.x_all)
+        self.x_all = ss.transform(self.x_all)
 
-    # Clip preds for log safety
-    y_pred = np.log(np.clip(y_pred, 1e-15, 1 - 1e-15))
+        subset_test = self.test[self.selected_cols].replace([-np.inf, np.inf], np.nan)
+        subset_test.fillna(train_mean, inplace=True)
+        self.x_test = subset_test.values
+        self.x_test = ss.transform(self.x_test)
 
-    # Compute loss
-    class_avg_losses = np.sum(y_true * y_pred, axis=0) / np.sum(y_true, axis=0)
-    loss = -np.sum(class_avg_losses * _weights) / np.sum(_weights)
+    # Loss-related methods
+    def weighted_average_crossentropy_backend(self, y_true, y_pred):
+        '''
+        Custom defined weight multiclass cross entropy
+        :param y_true: OHE targets
+        :param y_pred: 2D array of probabilities, summing to 1 per row (across classes)
+        :return: (float) Calculated loss
+        '''
 
-    return loss
+        # In ascending class order : 6,15,...,92,95
+        _weights = K.constant([
+            1.001044,
+            2.001886,
+            1.001044,
+            1.001044,
+            1.001044,
+            1.,
+            1.001044,
+            2.007104,
+            1.001044,
+            1.001044,
+            1.001044,
+            1.001044,
+            1.001044,
+            1.001044,
+        ], dtype='float32')
 
-def save_submission(y_test, sub_name, rs_bins, nrows=None):
+        # Clip preds for log safety
+        y_pred = K.log(K.clip(y_pred, 1e-15, 1 - 1e-15))
 
-    # Get submission header
-    col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
-    num_classes = len(col_names) - 1
+        # Compute loss
+        class_avg_losses = K.sum(y_true * y_pred, axis=0) / K.sum(y_true, axis=0)
+        loss = -K.sum(class_avg_losses * self.weights) / K.sum(self.weights)
 
-    # Get test ids
-    object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows, usecols=['object_id']).values.astype(int)
-    num_ids = object_ids.size
+        return loss
+    def weighted_average_crossentropy_numpy(self, y_true, y_pred):
+        '''
+        Custom defined weight multiclass cross entropy
+        :param y_true: OHE targets
+        :param y_pred: 2D array of probabilities, summing to 1 per row (across classes)
+        :return: (float) Calculated loss
+        '''
 
-    # Class 99 adjustment - remember these are conditional probs on redshift
-    c99_bin0_prob = 0.021019
-    c99_bin1_9_prob = 0.102627
+        # Clip preds for log safety
+        y_pred = np.log(np.clip(y_pred, 1e-15, 1 - 1e-15))
 
-    c99_probs = np.zeros((y_test.shape[0],1))
-    c99_probs[rs_bins==0] = c99_bin0_prob
-    c99_probs[rs_bins!=0] = c99_bin1_9_prob
-    y_test[rs_bins==0] *= (1 - c99_bin0_prob)
-    y_test[rs_bins!=0] *= (1 - c99_bin1_9_prob)
+        # Compute loss
+        class_avg_losses = np.sum(y_true * y_pred, axis=0) / np.sum(y_true, axis=0)
+        loss = -np.sum(class_avg_losses * self.weights) / np.sum(self.weights)
 
-    sub = np.hstack([object_ids, y_test, c99_probs])
+        return loss
 
-    h = ''
-    for s in col_names:
-        h += s + ','
-    h = h[:-1]
+    # State-related methods
+    def save(self, model_name):
+        '''
+        Model save
+        '''
 
-    # Write to file
-    np.savetxt(
-        fname=sub_name,
-        X=sub,
-        fmt=['%d'] + ['%.6f'] * num_classes,
-        delimiter=',',
-        header=h,
-        comments='',
-    )
+        # Setup save dir
+        timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d_%H:%M:%S')
+        mean_loss = np.mean(self.fold_val_losses)
+        model_name += '__' + timestamp + '__' + f'{mean_loss:.4f}'
+        os.mkdir(os.getcwd() + '/models/' + model_name)
 
-'''
-Load and preprocess data
-'''
+        # Save model
+        for i, nn in enumerate(self.models):
+            fold_name = f'fold{i:d}'
+            fold_loss = self.fold_val_losses[i]
+            filepath = os.getcwd() + '/models/' + model_name + '/' + fold_name + f'__{fold_loss:.4f}.h5'
+            nn.save(filepath=filepath)
+    def load(self, models_rel_dir):
+        '''
+        Load pretrained nets into memory
+        '''
+        nn_names = glob.glob(os.getcwd() + '/' + models_rel_dir + '/*.h5')
+        nn_names.sort()
+        self.models.extend([load_model(os.getcwd() + '/' + models_rel_dir + f'/fold{i}__' + n.split('__')[-1]) for i,n in enumerate(nn_names)])
 
-train_feats_list = [
-    'data/training_feats/training_set_feats_r3_m-feats_weighted_v1.h5',
-    'data/training_feats/training_set_feats_r3_t-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_d-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_slope-feats_v1.h5',
-    'data/training_feats/training_set_feats_r3_e-feats_v1.h5',
-    # 'data/training_feats/training_set_feats_r2_v7.h5',
-    # 'data/training_feats/training_set_feats_r2_slope_v2.h5',
-    # 'data/training_feats/training_set_feats_r2_err_v1.h5',
-    # 'data/training_feats/training_set_feats_r2_exp.h5',
-]
-test_feats_list = [
-    # 'data/test_feats/test_set_feats_std.h5'
-    'data/test_feats/test_set_feats_r2_v7.h5',
-    'data/test_feats/test_set_feats_r2_slope_v2.h5',
-]
+    # Other methods
+    def save_submission(self, y_test, sub_name, rs_bins, nrows=None):
 
-train, test, y_tgt, train_cols = utils.prep_data(train_feats_list, test_feats_list)
+        # Get submission header
+        col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)
+        num_classes = len(col_names) - 1
 
-produce_sub = False
-sub_name = 'v1.0'
+        # Get test ids
+        object_ids = pd.read_csv(filepath_or_buffer='data/test_set_metadata.csv', nrows=nrows,
+                                 usecols=['object_id']).values.astype(int)
+        num_ids = object_ids.size
 
-'''
-Class weights
-'''
+        # Class 99 adjustment - remember these are conditional probs on redshift
+        c99_bin0_prob = 0.02
+        c99_bin1_9_prob = 0.14
 
-class_weights_dict = {
-    95 : 1.001044,
-    92 : 1.001044,
-    90 : 1.001044,
-    88 : 1.001044,
-    67 : 1.001044,
-    65 : 1.001044,
-    64 : 2.007104,
-    62 : 1.001044,
-    53 : 1.000000,
-    52 : 1.001044,
-    42 : 1.001044,
-    16 : 1.001044,
-    15 : 2.001886,
-    6 : 1.001044,
-}
-class_codes = np.unique(list(class_weights_dict.keys()))
-class_weights = {i : class_weights_dict[c] for i,c in enumerate(class_codes)}
-label_encode = {c: i for i, c in enumerate(class_codes)}
-weights = np.array([class_weights[i] for i in range(len(class_weights))])
+        c99_probs = np.zeros((y_test.shape[0], 1))
+        c99_probs[rs_bins == 0] = c99_bin0_prob
+        c99_probs[rs_bins != 0] = c99_bin1_9_prob
+        y_test[rs_bins == 0] *= (1 - c99_bin0_prob)
+        y_test[rs_bins != 0] *= (1 - c99_bin1_9_prob)
 
-# Encode target labels
-for i,tgt in enumerate(y_tgt):
-    y_tgt[i] = label_encode[tgt]
+        sub = np.hstack([object_ids, y_test, c99_probs])
 
-# Setup OH target
-y_tgt_oh = np.eye(len(weights))[y_tgt]
+        h = ''
+        for s in col_names:
+            h += s + ','
+        h = h[:-1]
 
-# Compute sample weights
-sample_weights = compute_sample_weight('balanced', y_tgt)
+        # Write to file
+        np.savetxt(
+            fname=sub_name,
+            X=sub,
+            fmt=['%d'] + ['%.6f'] * num_classes,
+            delimiter=',',
+            header=h,
+            comments='',
+        )
+    def build_model(self, layer_dims, dropout_rate, activation='relu'):
+        # create model
+        model = Sequential()
 
-'''
-Input scaling and additional preprocess for nn
-'''
+        if len(layer_dims)<1:
+            raise ValueError('Mlp must have at least one layer')
 
-# Take care of NAs (mostly from features)
-subset_train = train[train_cols].replace([-np.inf, np.inf], np.nan)
-train_mean = subset_train.mean(axis=0)
-subset_train.fillna(train_mean, inplace=True)
-x_all = subset_train.values
+        # first layer
+        model.add(Dense(layer_dims[0], input_dim=self.x_all.shape[1], activation=activation))
+        model.add(BatchNormalization())
+        model.add(Dropout(dropout_rate))
 
-ss = StandardScaler()
-ss.fit(x_all)
-x_all = ss.transform(x_all)
+        # further layers
+        for ld in layer_dims[1:]:
+            model.add(Dense(ld, activation=activation))
+            model.add(BatchNormalization())
+            model.add(Dropout(dropout_rate))
 
-if produce_sub:
-    subset_test = test[train_cols].replace([-np.inf, np.inf], np.nan)
-    subset_test.fillna(train_mean, inplace=True)
-    x_test = subset_test.values
-    x_test = ss.transform(x_test)
+        model.add(Dense(14, activation='softmax'))
+        return model
 
-'''
-Setup CV
-'''
+    # Main methods
+    def fit(self, params):
+        
+        '''
+        Setup CV
+        '''
+        
+        # CV cycle collectors
+        nns = []
+        fold_val_losses = []
+        y_oof = np.zeros(self.y_tgt_oh.shape)
+        
+        # Setup stratified CV
+        num_folds = 5
+        folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
+        
+        for i, (_train, _eval) in enumerate(folds.split(self.y_tgt, self.y_tgt)):
+        
+            print(f'>   nn : Computing fold number {i} . . .')
+        
+            # Setup fold data
+            x_train, y_train = self.x_all[_train], self.y_tgt_oh[_train]
+            x_eval, y_eval = self.x_all[_eval], self.y_tgt_oh[_eval]
+            sample_weights_fold = self.sample_weights[_train]
 
-# CV cycle collectors
-nns = []
-fold_val_losses = []
-y_oof = np.zeros(y_tgt_oh.shape)
+            '''
+            Model setup
+            '''
 
-# Setup stratified CV
-num_folds = 5
-folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
-
-for i, (_train, _eval) in enumerate(folds.split(y_tgt, y_tgt)):
-
-    print(f'>   nn : Computing fold number {i} . . .')
-
-    '''
-    Model setup
-    '''
-
-    # Setup fold data
-    x_train, y_train = x_all[_train], y_tgt_oh[_train]
-    x_eval, y_eval = x_all[_eval], y_tgt_oh[_eval]
-    sample_weights_fold = sample_weights[_train]
-
-    # Instantiate model
-    nn = build_model(dropout_rate=0.25, activation='relu')
-
-    # Compile model
-    nn.compile(
-        optimizer=optimizers.SGD(lr=0.03, momentum=0, decay=0, nesterov=False),
-        loss='categorical_crossentropy',
-    )
-
-    '''
-    Model fit
-    '''
-
-    # Fit overall definitions
-    batch_size = 256
-    num_epochs = 10000
-
-    hist = nn.fit(
-        x=x_train,
-        y=y_train,
-        epochs=num_epochs,
-        batch_size=batch_size,
-        validation_data=(x_eval, y_eval),
-        sample_weight=sample_weights_fold,
-        callbacks=[
-            EarlyStopping(
-                monitor='val_loss',
-                min_delta=0,
-                patience=10,
-                mode='min',
+            # Instantiate model
+            nn = self.build_model(layers_dims=params['layer_dims'], dropout_rate=params['dropout_rate'], activation='relu')
+        
+            # Compile model
+            nn.compile(
+                optimizer=optimizers.SGD(lr=params['lr'], momentum=0, decay=0, nesterov=False),
+                loss='categorical_crossentropy',
             )
-        ],
-        verbose=0,
-    )
+        
+            '''
+            Model fit
+            '''
+        
+            # Fit overall definitions
+            batch_size = params['batch_size']
+            num_epochs = params['num_epochs']
+        
+            hist = nn.fit(
+                x=x_train,
+                y=y_train,
+                epochs=num_epochs,
+                batch_size=batch_size,
+                validation_data=(x_eval, y_eval),
+                sample_weight=sample_weights_fold,
+                class_weight=self.weights,
+                callbacks=[
+                    EarlyStopping(
+                        monitor='val_loss',
+                        min_delta=0,
+                        patience=10,
+                        mode='min',
+                    )
+                ],
+                verbose=0,
+            )
 
-    # Debug outputs
-    # get_layer_outs = K.function([nn.layers[0].input, K.learning_phase()],
-    #                                   [layer.output for layer in nn.layers])
-    # layer_output = get_layer_outs([x_eval, 1])
-    # _w = nn.layers[0].get_weights()
+            self.models.append(nn)
 
-    y_oof[_eval, :] = nn.predict(x_eval, batch_size=10000)
-    val_loss = weighted_average_crossentropy_numpy(y_eval, y_oof[_eval, :])
-    fold_val_losses.append(val_loss)
-    print(f'>    nn : Fold val loss : {val_loss:.4f}')
+            # Debug outputs
+            # get_layer_outs = K.function([nn.layers[0].input, K.learning_phase()],
+            #                                   [layer.output for layer in nn.layers])
+            # layer_output = get_layer_outs([x_eval, 1])
+            # _w = nn.layers[0].get_weights()
 
-    nns.append(nn)
+            y_oof[_eval, :] = nn.predict(x_eval, batch_size=10000)
+            val_loss = self.weighted_average_crossentropy_numpy(y_eval, y_oof[_eval, :])
+            self.fold_val_losses.append(val_loss)
+            print(f'>    nn : Fold val loss : {val_loss:.4f}')
 
-print('>    nn : Remote CV results : ')
-print(pd.Series(fold_val_losses).describe())
+        print('>    nn : Remote CV results : ')
+        print(pd.Series(self.fold_val_losses).describe())
+    def predict(self, iteration_name, predict_test=True, save_preds=True, produce_sub=False, save_confusion=True):
 
+        if not self.models:
+            raise ValueError('Must fit or load models before predicting')
 
-'''
-Model save
-'''
+        if produce_sub:
+            predict_test = True
 
-# Setup save dir
-timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d_%H:%M:%S')
-model_name = 'nn_v1'
-mean_loss = np.mean(fold_val_losses)
-model_name += '__'+timestamp+'__'+f'{mean_loss:.4f}'
-os.mkdir(os.getcwd() + '/models/' + model_name)
+        '''
+        Setup CV
+        '''
 
-# Save model
-for i,nn in enumerate(nns):
-    fold_name = f'fold{i:d}'
-    fold_loss = fold_val_losses[i]
-    filepath = os.getcwd() + '/models/' +model_name + '/' + fold_name + f'__{fold_loss:.4f}.h5'
-    nn.save(filepath=filepath)
+        y_oof = np.zeros(self.y_tgt_oh.shape)
+        y_test = np.zeros((self.test.shape[0], self.weights.size))
 
+        # Setup stratified CV
+        num_folds = 5
+        folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
 
-'''
-Submission creation
-'''
+        for i, (_train, _eval) in enumerate(folds.split(self.y_tgt, self.y_tgt)):
+            print(f'>   nn : Predicting on fold number {i} . . .')
 
-# Make sub by averaging preds from all fold models
-if produce_sub:
-    y_preds = []
-    for nn in tqdm.tqdm(nns, total=len(nns)):
-        y_preds.append(nn.predict(x_test, batch_size=int(x_test.shape[0]/500)))
-    y_sub = np.mean(y_preds, axis=0)
+            # Setup fold data
+            x_eval, y_eval = self.x_all[_eval], self.y_tgt_oh[_eval]
 
-    print(f'>   nn : Saving sub . . .')
-    save_submission(
-        y_sub,
-        sub_name=f'./subs/nn_{sub_name}_{np.mean(fold_val_losses):.4f}.csv',
-        rs_bins=test['rs_bin'].values
-    )
+            # Train predictions (oof)
+            y_oof[_eval, :] = self.models[i].predict(x_eval, batch_size=10000)
 
-print(f'>   nn : Done')
+            # Test predictions
+            if predict_test:
+                y_test += self.models[i].predict(self.x_test, batch_size=10000) / num_folds
+
+            val_loss = self.weighted_average_crossentropy_numpy(y_eval, y_oof[_eval, :])
+            self.fold_val_losses.append(val_loss)
+            print(f'>   nn : Fold val loss : {val_loss:.4f}')
+
+        final_name = f'mlp_{iteration_name}_{np.mean(self.fold_val_losses):.4f}'
+
+        if save_preds:
+            class_names = [final_name + '__' + str(c) for c in self.class_codes]
+
+            oof_preds = pd.concat([self.train[['object_id']], pd.DataFrame(y_oof, columns=class_names)], axis=1)
+            oof_preds.to_hdf(self.output_dir + f'{final_name}_oof.h5', key='w')
+
+            if predict_test:
+                test_preds = pd.concat([self.test[['object_id']], pd.DataFrame(y_test, columns=class_names)], axis=1)
+                test_preds.to_hdf(self.output_dir + f'{final_name}_test.h5', key='w')
+
+        if produce_sub:
+            self.save_submission(y_test, f'./subs/{final_name}.csv', rs_bins=self.test['rs_bin'].values)
+
+        if save_confusion:
+            y_preds = np.argmax(y_oof, axis=1)
+            cm = confusion_matrix(self.y_tgt, y_preds)
+            plot_confusion_matrix(cm, classes=[str(c) for c in self.class_codes],
+                                  filename_='confusion/confusion_' + final_name, normalize=True)
