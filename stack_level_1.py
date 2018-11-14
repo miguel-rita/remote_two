@@ -13,16 +13,17 @@ def main():
         'data/training_feats/training_set_feats_r4_m-feats_v1.h5',
         'data/training_feats/training_set_feats_r4_t-feats_v1.h5',
         'data/training_feats/training_set_feats_r4_d-feats_v1.h5',
-        'data/training_feats/training_set_feats_r4_linreg-feats_v1.h5',
-        'data/training_feats/training_set_feats_r4_peak-feats-15mean_v4.h5',
+        'data/training_feats/training_set_feats_r4_linreg-feats_v2.h5',
+        # 'data/training_feats/training_set_feats_r4_spike-feats_v1.h5',
+        # 'data/training_feats/training_set_feats_r4_peak-feats_v2_all15mjddists.h5',
     ]
     test_feats_list = [
-        # 'data/test_feats/test_set_feats_std.h5',
-        'data/test_feats/test_set_feats_r4_m-feats_v1.h5',
-        'data/test_feats/test_set_feats_r4_t-feats_v1.h5',
-        'data/test_feats/test_set_feats_r4_d-feats_v1.h5',
-        'data/test_feats/test_set_feats_r4_linreg-feats_v1.h5',
-        'data/test_feats/test_set_feats_r4_peak-feats-mean15_v4.h5',
+        'data/test_feats/test_set_feats_std.h5',
+        # 'data/test_feats/test_set_feats_r4_m-feats_v1.h5',
+        # 'data/test_feats/test_set_feats_r4_t-feats_v1.h5',
+        # 'data/test_feats/test_set_feats_r4_d-feats_v1.h5',
+        # 'data/test_feats/test_set_feats_r4_linreg-feats_v1.h5',
+        # 'data/test_feats/test_set_feats_r4_peak-feats-mean15_v4.h5',
     ]
     train, test, y_tgt, selected_cols = utils.prep_data(train_feats_list, test_feats_list)
 
@@ -62,7 +63,7 @@ def main():
             iteration_name=model_name,
             predict_test=False,
             save_preds=True,
-            produce_sub=True,
+            produce_sub=False,
             save_imps=True,
             save_confusion=True
         )

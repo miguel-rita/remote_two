@@ -25,9 +25,10 @@ def atomic_worker(args):
     compute_feats = {
         'm-feats'            : bool(0),
         't-feats'            : bool(0),
-        'd-feats'            : bool(0),
-        'peak-feats'         : bool(1),
+        'd-feats'            : bool(1),
+        'peak-feats'         : bool(0),
         'linreg-feats'       : bool(0),
+        'spike-feats'        : bool(0),
         'e-feats'            : bool(0),
         'cesium-feats'       : bool(0),
         'slope-feats'        : bool(0),
@@ -171,9 +172,8 @@ def atomic_worker(args):
         feats_to_compute = [np.mean]
         num_bands = 6
         func_names = ['detected_'+n for n in ['mean']]
-        local_names = ['detected_'+n for n in ['mean']]
 
-        for fn in local_names:
+        for fn in func_names:
             feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
 
         # Allocate numpy placeholder for computed feats
@@ -202,12 +202,8 @@ def atomic_worker(args):
     '''
     if compute_feats['peak-feats']:
 
-        mode_select = {
-            '1maxmax'   : bool(0),
-            '1maxmean'  : bool(0),
-            '15max'    : bool(0),
-            '15mean'   : bool(1),
-        }
+        # peak_feats = ['max_delta_peak']
+        # feat_names.extend([f'{fn}' for fn in peak_feats])
 
         # Temp array for later collapse
         peak_array_bands_max = np.zeros(
@@ -217,6 +213,7 @@ def atomic_worker(args):
             shape=(oids.size, 6)  # six bands per feat
         )
 
+        # Compute simple b1 from linreg from normalized peak
         for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
             for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
 
@@ -232,47 +229,21 @@ def atomic_worker(args):
                     peak_array_bands_max[i, j] = np.nan
                     peak_array_bands_mean[i, j] = np.nan
 
-            # Interp missing values in line
-            width = peak_array_bands_max.shape[1]
-            x = np.arange(width)
-            line1 = peak_array_bands_max[i]
-            line2 = peak_array_bands_mean[i]
-            if np.sum(np.isnan(line1)) < width:
-                peak_array_bands_max[i] = np.interp(x, x[np.logical_not(np.isnan(line1))], line1[np.logical_not(np.isnan(line1))])
-                peak_array_bands_mean[i] = np.interp(x, x[np.logical_not(np.isnan(line2))], line2[np.logical_not(np.isnan(line2))])
+        #peak_array_bands = peak_array_bands[:,2:5]
+        #peak_array = np.nanmax(peak_array_bands, axis=1, keepdims=True) - np.nanmin(peak_array_bands, axis=1, keepdims=True)
 
         peak_array_max = np.zeros(shape=(oids.size, 15))
         peak_array_mean = np.zeros(shape=(oids.size, 15))
 
-        # Compute simple 1D maxes
-        peak_maxmax = np.nanmax(peak_array_max, axis=1, keepdims=True) - np.nanmin(peak_array_max, axis=1, keepdims=True)
-        peak_maxmean = np.nanmax(peak_array_mean, axis=1, keepdims=True) - np.nanmin(peak_array_mean, axis=1, keepdims=True)
-
-        max_names = []
-        mean_names = []
-        # Compute cross band max peak mjd deltas (15 and 30 variants)
+        # Compute cross band max peak mjd deltas
         for i, (band_a, band_b) in enumerate(combinations(range(6), 2)):
             peak_array_max[:, i] = peak_array_bands_max[:,band_a] - peak_array_bands_max[:,band_b]
             peak_array_mean[:, i] = peak_array_bands_mean[:,band_a] - peak_array_bands_mean[:,band_b]
 
-            max_names.append(f'mjd_peak_dist_max_{band_a:d}_{band_b:d}')
-            mean_names.append(f'mjd_peak_dist_mean_{band_a:d}_{band_b:d}')
+            feat_names.append(f'mjd_peak_dist_max_{band_a:d}_{band_b:d}')
+            feat_names.append(f'mjd_peak_dist_mean_{band_a:d}_{band_b:d}')
 
-        # Only append selected feats
-        if mode_select['1maxmax']:
-            feat_names.append('peak_maxmax')
-            feat_arrays.extend([peak_maxmax])
-        elif mode_select['1maxmean']:
-            feat_names.append('peak_maxmean')
-            feat_arrays.extend([peak_maxmean])
-        elif mode_select['15max']:
-            feat_names.extend(mean_names)
-            feat_arrays.extend([peak_array_max])
-        elif mode_select['15mean']:
-            feat_names.extend(mean_names)
-            feat_arrays.extend([peak_array_mean])
-        else:
-            raise ValueError('Compute peak feats error : No mode selected')
+        feat_arrays.extend([peak_array_max, peak_array_mean])
 
     '''
     Linreg feats
@@ -287,7 +258,6 @@ def atomic_worker(args):
         linreg_array = np.zeros(
             shape=(oids.size, num_feats * len(lin_feats))
         )
-
 
         local_feat_names = [f'linreg_b1_{cn_}' for cn_ in linreg_feats]
         for j in lin_feats:
@@ -325,7 +295,7 @@ def atomic_worker(args):
                         if ft == 'back':
                             mask = t_band <= 0
                         elif ft == 'front':
-                            mask = t_band >= 0
+                            mask = (t_band >= 0) & (t_band <= 100)
                         else:
                             raise ValueError('Unknown linreg feature type')
 
@@ -350,6 +320,111 @@ def atomic_worker(args):
             #linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
 
         feat_arrays.append(linreg_array)
+
+        # # Compute cross relations
+        # linreg_cross_array = np.zeros((oids.size, 6*2))
+        # # Add names
+        # for fn in ['linregback', 'linregfront']:
+        #     feat_names.extend([f'{fn}_{j}' for j in range(6)])
+        # # Compute
+        # for feat_num in range(num_feats):
+        #     linreg_cross_array[:,feat_num*6:(feat_num+1)*6] =\
+        #         linreg_bands[:,feat_num::num_feats] /\
+        #         np.nansum(np.abs(linreg_bands[:, feat_num::num_feats]), axis=1, keepdims=True)
+        # # Append cross relations
+        # feat_arrays.append(linreg_cross_array)
+
+    '''
+    Spike feats
+    '''
+    if compute_feats['spike-feats']:
+
+        spike_feats = ['back', 'front']
+        agg_feats = ['mean']  # , 'std']
+        num_feats = len(spike_feats)  # Back and front linreg fits
+
+        # Allocate numpy placeholder for computed feats
+        spike_array = np.zeros(
+            shape=(oids.size, num_feats * len(agg_feats))
+        )
+
+        local_feat_names = [f'spike_{cn_}' for cn_ in spike_feats]
+        for j in agg_feats:
+            feat_names.extend([f'{fn}_{j}' for fn in local_feat_names])
+
+        # Band info array for later collapse
+        spike_bands = np.zeros(
+            shape=(oids.size, num_feats * 6)  # six bands per feat
+        )
+
+        # Compute spyke feat from normalized peak
+        for i, (t_curves, m_curves, e_curves, d_curves) in enumerate(zip(lcs[0], lcs[1], lcs[2], lcs[3])):
+            for j, (t_band, m_band, e_band, d_band) in enumerate(zip(t_curves, m_curves, e_curves, d_curves)):
+
+                # Filtered only
+                m_band = m_band[d_band.astype(bool)]
+                t_band = t_band[d_band.astype(bool)]
+                e_band = e_band[d_band.astype(bool)]
+
+                if len(t_band) >= 2:  # Need 2 points at least for spyke
+                    # Identify peak mjd and transpose series to mjd 0 at peak
+                    peak_loc = np.argmax(m_band)
+                    t_band -= t_band[peak_loc]
+
+                    # Normalize series and remove unitary bias
+                    m_band /= m_band[peak_loc]
+                    e_band /= m_band[peak_loc]
+                    m_band -= 1
+                else:
+                    # If band non-existent fit is impossible ie. nan
+                    spike_bands[i, j * num_feats:j * num_feats + num_feats] = np.nan
+
+                for k, ft in enumerate(spike_feats):
+
+                    if ft == 'back':
+                        mask = (t_band <= 0)
+                    elif ft == 'front':
+                        mask = (t_band >= 0)
+                    else:
+                        raise ValueError('Unknown spike feature type')
+
+                    # Incorporate error
+                    # t_band /= e_band
+                    # m_band /= e_band
+
+                    t_band_partial = t_band[mask]
+                    m_band_partial = m_band[mask]
+
+                    if len(t_band_partial) >= 2:  # Need 2 points at least for spike
+
+                        deltas = m_band_partial[1:]-m_band_partial[:-1]
+                        spike = np.sum(np.abs(deltas)) / np.max([0.05, np.abs(np.sum(deltas))])
+
+                    else:
+                        spike = np.nan
+
+                    spike_bands[i, j * num_feats + k] = spike
+
+        # Aggregate scores across bands
+        # linreg_bands = linreg_bands[:,4:-2]
+        for feat_num in range(num_feats):
+            spike_array[:, feat_num] = np.nanmean(spike_bands[:, feat_num::num_feats], axis=1)
+            # linreg_array[:,2+feat_num] = np.nanstd(linreg_bands[:,feat_num::num_feats], axis=1)
+
+        feat_arrays.append(spike_array)
+
+        # # Compute cross relations
+        # linreg_cross_array = np.zeros((oids.size, 6*2))
+        # # Add names
+        # for fn in ['linregback', 'linregfront']:
+        #     feat_names.extend([f'{fn}_{j}' for j in range(6)])
+        # # Compute
+        # for feat_num in range(num_feats):
+        #     linreg_cross_array[:,feat_num*6:(feat_num+1)*6] =\
+        #         linreg_bands[:,feat_num::num_feats] /\
+        #         np.nansum(np.abs(linreg_bands[:, feat_num::num_feats]), axis=1, keepdims=True)
+        # # Append cross relations
+        # feat_arrays.append(linreg_cross_array)
 
     '''
     e-feats (filtered flux_err)
@@ -387,12 +462,12 @@ def atomic_worker(args):
         #feat_arrays.append(e_array)
 
         # Compute cross flux relations
-        cross_band_names = ['cross_band_ferr_mean_contrib']
+        cross_band_names = ['cross_band_ferr_mean_contrib', 'cross_band_ferr_max_contrib']
         for fn in cross_band_names:
             feat_names.extend([f'{fn}_{i:d}' for i in range(num_bands)])
         ec_array = np.hstack([
             e_array[:, :6] / np.sum(e_array[:, 6:12], axis=1)[:, None],
-            #e_array[:, 6:12] / np.sum(e_array[:, 6:12], axis=1)[:, None],
+            e_array[:, 6:12] / np.sum(e_array[:, 6:12], axis=1)[:, None],
         ])
         feat_arrays.append(ec_array)
 
@@ -632,11 +707,11 @@ def main(save_dir, save_name, light_curves_dir, n_batches):
         pickle.dump(feat_list, f2, protocol=pickle.HIGHEST_PROTOCOL)
 
 
-set_str = 'test'
+set_str = 'training'
 st = time.time()
 main(
     save_dir='data/'+set_str+'_feats',
-    save_name=set_str+'_set_feats_r4_peak-feats-mean15_v4.h5',
+    save_name=set_str+'_set_feats_r4_d-feats_v1.h5',
     light_curves_dir='data/'+set_str+'_cesium_curves',
     n_batches=8,
 )
