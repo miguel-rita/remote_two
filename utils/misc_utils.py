@@ -44,7 +44,7 @@ def save_importances(imps_, filename_):
     plt.savefig(filename_+'.png')
     plt.clf()
 
-def save_submission(self, y_test, sub_name, rs_bins, nrows=None):
+def save_submission(y_test, sub_name, rs_bins, nrows=None):
 
     # Get submission header
     col_names = list(pd.read_csv(filepath_or_buffer='data/sample_submission.csv', nrows=1).columns)

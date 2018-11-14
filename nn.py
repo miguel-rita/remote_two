@@ -181,10 +181,10 @@ class MlpModel:
         if len(layer_dims)<1:
             raise ValueError('Mlp must have at least one layer')
 
-        # first layer
+        # first layer, smaller dropout
         model.add(Dense(layer_dims[0], input_dim=self.x_all.shape[1], activation=activation))
         model.add(BatchNormalization())
-        model.add(Dropout(dropout_rate))
+        model.add(Dropout(dropout_rate / 4))
 
         # further layers
         for ld in layer_dims[1:]:
@@ -325,7 +325,7 @@ class MlpModel:
                 test_preds.to_hdf(self.output_dir + f'{final_name}_test.h5', key='w')
 
         if produce_sub:
-            save_submission(y_test, f'./subs/{final_name}.csv', rs_bins=self.test['rs_bin'].values)
+            save_submission(y_test, sub_name=f'./subs/{final_name}.csv', rs_bins=self.test['rs_bin'].values)
 
         if save_confusion:
             y_preds = np.argmax(y_oof, axis=1)

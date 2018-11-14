@@ -125,6 +125,7 @@ class LgbmModel:
                 class_weight=self.class_weights,
                 reg_alpha=self.fit_params['reg_alpha'],
                 reg_lambda=self.fit_params['reg_lambda'],
+                min_child_samples=self.fit_params['min_child_samples'],
                 silent=self.fit_params['silent'],
                 verbose=-1,
             )
@@ -179,7 +180,7 @@ class LgbmModel:
                 test_preds.to_hdf(self.output_dir + f'{final_name}_test.h5', key='w')
 
         if produce_sub:
-            save_submission(y_test, f'./subs/{final_name}.csv', rs_bins=np.load('data/rs_bins.npy'))
+            save_submission(y_test, sub_name=f'./subs/{final_name}.csv', rs_bins=np.load('data/rs_bins.npy'))
 
         if save_confusion:
             y_preds = np.argmax(y_oof, axis=1)

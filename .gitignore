@@ -33,6 +33,7 @@ level_1_preds/*
 level_2_preds/*
 confusion/*
 imps/*
+edas/*
 
 utils/__py*
 .ipynb*
