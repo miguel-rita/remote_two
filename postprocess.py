@@ -3,7 +3,7 @@ import numpy as np
 import tqdm
 
 '''
-Postprocessing gimmicks
+Postprocessing histogram shifting
 '''
 
 def build_prior_table(approx_freqs_dict):

@@ -40,7 +40,6 @@ level_3_preds/*
 
 confusion_matrices/*
 imps/*
-edas/*
 
 utils/__py*
 .ipynb*

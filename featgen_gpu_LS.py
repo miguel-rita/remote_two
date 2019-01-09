@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import cuvarbase.lombscargle as gls
 from utils.misc_utils import load_lightcurves_from_path
-import matplotlib.pyplot as plt
 import tensorflow as tf
 import os, time
 
@@ -119,39 +118,3 @@ pd.DataFrame(
 ).to_hdf('data/training_feats/LS_vanilla_train_feats_10bins.h5', 'w')
 
 print('Done')
-
-
-
-
-
-############
-# Plotting #
-############
-
-# soid = 45
-# eoid = soid+6
-#
-#
-# f, axes = plt.subplots(6, 6,
-#                        figsize=(12,12))
-#
-# for (frqs, ls_power), ax in zip(results[soid*6:eoid*6],
-#                                       np.ravel(axes),
-#                                       ):
-#         ax.set_xscale('log')
-#         ax.plot(frqs, ls_power)
-#         #ax.axvline(freq, ls=':', color='r')
-#         #ax.set_ylim([0, 0.8])
-#
-# f.text(0.05, 0.5, "Lomb-Scargle", rotation=90,
-#        va='center', ha='right', fontsize=10)
-# f.text(0.5, 0.05, "Frequency",
-#        va='top', ha='center', fontsize=10)
-#
-#
-#
-# f.tight_layout()
-# f.subplots_adjust(left=0.1, bottom=0.1)
-# print(pd.read_csv('data/training_set_metadata.csv')['target'].iloc[soid:eoid])
-# plt.show()
-

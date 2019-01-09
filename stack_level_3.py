@@ -45,7 +45,6 @@ def main():
     '''
     LGBM models
     '''
-
     if controls['lgbm-models']:
 
         fit_params = {

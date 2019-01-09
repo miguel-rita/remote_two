@@ -77,5 +77,3 @@ for bin_num in tqdm.tqdm(np.arange(num_bins), total=num_bins):
             header=h,
             comments='',
         )
-
-print('Done')

@@ -72,20 +72,6 @@ def main(src_str, chunk_size):
         iterator=True
     )
 
-    # # TEST
-    # fulldf = pd.read_csv(
-    #     filepath_or_buffer=source_csv,
-    #     dtype={
-    #         'object_id': np.int32,
-    #         'mjd': np.float32,
-    #         'passband': np.int8,
-    #         'flux': np.float32,
-    #         'flux_err': np.float32,
-    #         'detected': np.uint8,
-    #     },
-    # )
-    # dfs=[]
-
     print('>    file_chunker : Starting chunking process . . .')
 
     for i, curr_chunk in tqdm.tqdm(enumerate(it), total=n_chunks):
@@ -110,22 +96,16 @@ def main(src_str, chunk_size):
 
         # Save prev_chunk
         prev_chunk.to_hdf(save_dir + chunk_name + str(i-1) + '.h5', key='w', mode='w') # i-1 since we skipped first it
-        # # TEST
-        # dfs.append(prev_chunk)
 
         # If last chunk lats save it too
         if i == n_chunks-1:
             curr_chunk.to_hdf(save_dir + chunk_name + str(i) + '.h5', key='w', mode='w') # i-1 since we skipped first it
-            # # TEST
-            # dfs.append(curr_chunk)
+
         prev_chunk = curr_chunk
 
         del curr_chunk
         gc.collect()
 
-    # # TEST CODE
-    # fulldf2 = pd.concat(dfs, axis=0)
-    # assert np.array_equal(fulldf.values, fulldf2.values)
 
 if __name__ == '__main__':
     main('test', chunk_size=np.ceil(453653104/64))

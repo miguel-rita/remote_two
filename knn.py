@@ -1,10 +1,8 @@
 import numpy as np
 import pandas as pd
-
 import time, datetime, os, glob
 
 from sklearn.neighbors import KNeighborsClassifier
-
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import confusion_matrix

@@ -232,24 +232,6 @@ def main():
         if k not in classes_to_keep:
             weights_dict[k] = 1
 
-    # Get aug frequencies
-    # weights_dict = {
-    #         95: 1,
-    #         92: 1,
-    #         90: 1,
-    #         88: 1,
-    #         67: 10,
-    #         65: 1,
-    #         64: 1,
-    #         62: 4,
-    #         53: 1,
-    #         52: 10,
-    #         42: 2,
-    #         16: 1,
-    #         15: 1,
-    #         6: 1,
-    #     }
-
     # Augment metadata
     oids_table = build_oid_table(oids=oids, tgts=tgts, weights_dict=weights_dict)
     aug_meta = augment_meta(meta_df=meta, oids_table=oids_table)

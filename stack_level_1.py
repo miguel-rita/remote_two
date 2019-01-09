@@ -13,6 +13,8 @@ def main():
     Load and preprocess data
     '''
 
+    # Select relevant cached features
+
     train_feats_list = [
         'data/training_feats/training_set_feats_r7_m-feats_v3.h5',
         # 'data/training_feats/training_set_feats_r7_allm-feats_v1.h5',
@@ -78,6 +80,8 @@ def main():
     # selected_cols.remove('absmagmax_ratio_bands_2_4')
     # selected_cols.remove('absmagmax_diff_bands_3_5')
 
+    # Select models to train
+
     controls = {
         'lgbm-models'   : bool(0),
         'mlp-models'    : bool(1),
@@ -89,7 +93,6 @@ def main():
     '''
     LGBM Models
     '''
-
     if controls['lgbm-models']:
 
         # No need of this binary flag for tree-based models
@@ -357,7 +360,6 @@ def main():
             produce_sub=True,
             save_confusion=True
         )
-
 
 if __name__ == '__main__':
     main()

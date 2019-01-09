@@ -2,10 +2,7 @@ import numpy as np
 import pandas as pd
 import tqdm
 
-import time, datetime, os, glob
-
 from sklearn.svm import SVC
-
 from sklearn.model_selection import StratifiedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_sample_weight

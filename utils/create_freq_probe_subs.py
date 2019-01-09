@@ -87,5 +87,3 @@ for tgt_class, comp_class in tqdm.tqdm(pairs, total=len(pairs)):
             header=h,
             comments='',
         )
-
-print('Done . . .')

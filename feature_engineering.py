@@ -1415,14 +1415,3 @@ for ft_name, file_name in feats_to_gen.items():
 
 print(f'>   featgen_standard_v2 : Wall time : {(time.time()-st):.2f} seconds')
 
-# Featgen test
-# print(detected_feats(
-#     ts=[
-#         [0,1,2,7,8,9],
-#         [4,5,6,100,105,106,200],
-#     ],
-#     ds=[
-#         [0,1,1,1,1,0],
-#         [0,1,1,0,1,1,1],
-#     ],
-# ))

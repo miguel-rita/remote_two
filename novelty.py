@@ -16,7 +16,7 @@ train = pd.read_hdf('data/train_feats_od.h5')
 # Load tgt and add to feats
 train['tgt'] = np.load('data/target_col.npy')
 
-# Lets first try novelty detection on class 95 eg.
+# Lets first try novelty detection on a known class eg. 95
 
 # First, build the training and test sets from one start kfold
 y_tgt = train['tgt'].values

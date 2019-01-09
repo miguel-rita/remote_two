@@ -42,7 +42,7 @@ def prep_data(train_feats_list, test_feats_list, only_meta=False, augmented=Fals
 
     # Remove spectrometry redshift, distmod feats from both sets
     feats_to_delete = []
-    # feats_to_delete = ['hostgal_specz']
+    feats_to_delete = ['hostgal_specz']
     # meta_train.drop(feats_to_delete, axis=1, inplace=True)
     # meta_test.drop(feats_to_delete, axis=1, inplace=True)
 

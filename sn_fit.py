@@ -26,6 +26,7 @@ def msqe(x0, *args):
 '''
 Data loading
 '''
+
 # Load train set on cesium format
 cs_ = glob.glob('data/training_cesium_curves/*.pkl')
 oids_ = glob.glob('data/training_cesium_curves/*.npy')

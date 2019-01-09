@@ -312,6 +312,3 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
 #     save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
 #     n_batches=9,
 # )
-
-# ds = 'test'
-# store_metadata_by_chunks(f'../data/{ds}_cesium_curves', ds)

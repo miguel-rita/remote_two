@@ -21,7 +21,7 @@ cd = {
     '42' : (32.620, 'l'),
     '16' : (32.620, 'm'),
     '15' : (30.702, 'n'),
-    '6' : (32.620, 'o'),
+    '6'  : (32.620, 'o'),
 }
 
 # Build non-linear system of equations expression

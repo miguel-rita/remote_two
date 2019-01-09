@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-
 import time, datetime, os, glob
 
 from keras.models import Sequential, load_model

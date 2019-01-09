@@ -182,11 +182,3 @@ for var_name, freq, resi in zip(all_variables, x_sol, residuals):
 
 print(f'\nTotal sum : {np.sum(x_sol)}')
 print(f'\nCost :{cost}')
-
-# # Print dict
-# for var_name, freq, resi in zip(all_variables, x_sol, residuals):
-#     var_name = '\''+var_name+'\''
-#     print(f'{var_name} : {freq/np.sum(x_sol):.6f},')
-
-# for eq in system_str.split(','):
-#     print(eq)

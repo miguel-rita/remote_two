@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 
 '''
-Fast prototype to test usage of feats derived from SN fits
+Fast and dirty prototype to test usage of feats derived from SN fits
 '''
 
 # Load metadata and target/pred info
@@ -17,10 +17,6 @@ meta['target'] = np.load('data/target_col.npy')
 # Check sn fit params
 sn_fits = np.load('data/train_sn_fits.npy')
 sn_fits = np.concatenate([sn_fits, np.tile(meta['target'].values, (6,1)).T[:,:,None]], axis=2)
-
-
-# SAVE BEST T0s
-#tfall_data = sn_fits[:,3:6,3]
 
 # Maximum admissible error for best t0 estimate :
 MAX_ADMISS_ERROR = 1500
@@ -40,6 +36,7 @@ best_t0[valid_rows_mask] = masked_best_t0
 
 data_arr = np.concatenate([meta['object_id'].values[:,None], best_t0], axis=1)
 feat_names = ['best_t0']
+
 # Build feat dataframe
 feat_arr = pd.DataFrame(data=data_arr, columns=['object_id']+feat_names, index=None)
 feat_arr = feat_arr.astype({'object_id' : np.uint64})
