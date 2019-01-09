@@ -18,6 +18,8 @@ data/training_cesium_curves/*
 !data/training_cesium_curves/.dir.txt
 data/test_cesium_curves/*
 !data/test_cesium_curves/.dir.txt
+data/aug_training_feats/*
+!data/aug_training_feats/.dir.txt
 
 subs/*
 !subs/.dir.txt
@@ -31,7 +33,12 @@ models/*
 
 level_1_preds/*
 level_2_preds/*
-confusion/*
+level_3_preds/*
+!level_1_preds/.dir.txt
+!level_2_preds/.dir.txt
+!level_3_preds/.dir.txt
+
+confusion_matrices/*
 imps/*
 edas/*
 

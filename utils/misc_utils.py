@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import tqdm
 import multiprocessing as mp
-import os, pickle, gc
+import os, pickle, gc, glob
 import matplotlib.pyplot as plt
 import seaborn as sns
 import itertools
@@ -13,9 +13,11 @@ def plot_confusion_matrix(cm, classes, filename_, normalize=False, title='Confus
     Normalization can be applied by setting `normalize=True`.
     """
     if normalize:
-        cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+        cm = cm.astype('float') / cm.sum(axis=1, keepdims=True)
 
-    plt.figure(figsize=(10, 8))
+    nclasses = cm.shape[0]
+
+    plt.figure(figsize=(10 * nclasses / 14, 8 * nclasses / 14))
     plt.imshow(cm, interpolation='nearest', cmap=cmap)
     plt.title(title)
     plt.colorbar()
@@ -40,6 +42,7 @@ def save_importances(imps_, filename_):
     mean_gain.index.name = 'feat'
     plt.figure(figsize=(6, 17))
     sns.barplot(x='gain', y='feat', data=mean_gain.sort_values('gain', ascending=False))
+    plt.title(f'Num. feats = {mean_gain.shape[0]:d}')
     plt.tight_layout()
     plt.savefig(filename_+'.png')
     plt.clf()
@@ -55,17 +58,19 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
                              usecols=['object_id']).values.astype(int)
     num_ids = object_ids.size
 
-    # Class 99 adjustment - remember these are conditional probs on redshift
-    c99_bin0_prob = 0.02
-    c99_bin1_9_prob = 0.14
+    # Class 99 ref prob
+    reference_prob = 0.16
 
-    c99_probs = np.zeros((y_test.shape[0], 1))
-    c99_probs[rs_bins == 0] = c99_bin0_prob
-    c99_probs[rs_bins != 0] = c99_bin1_9_prob
-    y_test[rs_bins == 0] *= (1 - c99_bin0_prob)
-    y_test[rs_bins != 0] *= (1 - c99_bin1_9_prob)
+    c99_cols = 1 - y_test
+    num = np.multiply.reduce(c99_cols, axis=1, keepdims=True)
+    den = np.mean(c99_cols, axis=1, keepdims=True)
+    c99_col = num/den
+    avg_prob = np.mean(c99_col)
+    equalizing_const = reference_prob / avg_prob
+    c99_col *= equalizing_const
 
-    sub = np.hstack([object_ids, y_test, c99_probs])
+    y_test *= (1 - c99_col)
+    sub = np.hstack([object_ids, y_test, c99_col])
 
     h = ''
     for s in col_names:
@@ -76,11 +81,35 @@ def save_submission(y_test, sub_name, rs_bins, nrows=None):
     np.savetxt(
         fname=sub_name,
         X=sub,
-        fmt=['%d'] + ['%.6f'] * num_classes,
+        fmt=['%d'] + ['%.3f'] * num_classes,
         delimiter=',',
         header=h,
         comments='',
     )
+
+def mask_samples(tgt, mask_dict):
+    '''
+    Compute a boolean mask to cover tgt classes as specified by mask_dict.
+    Mask_dict entries as follows:
+    k : v, where k is the tgt class to mask, and v is a (v0, v1) tuple, where v0 is the number of splits to
+    make in class k, and v1 is the split number to leave unmasked (ie. True). All other splits are masked
+    '''
+
+    # Full mask
+    mask = np.ones(tgt.size)
+
+    for k, v in mask_dict.items():
+        # Get tgt indices
+        k_ixs = np.nonzero(tgt == k)[0]
+        # Split tgt indices
+        split_k_ixs = np.array_split(k_ixs, v[0])
+
+        # Cover all k splits except the choosen split
+        for i, s in enumerate(split_k_ixs):
+            if i != v[1]:
+                mask[s] = 0
+
+    return mask.astype(bool)
 
 def store_chunk_lightcurves_tsfresh(chunk, save_dir, save_name):
     '''
@@ -210,6 +239,27 @@ def store_chunk_lightcurves_from_path(chunk_path, save_dir, save_name):
     del df
     gc.collect()
 
+def store_metadata_by_chunks(curves_dir, dataset):
+    '''
+    Store metadata corresponding to each lcs/oids pair in 'curves_dir', in .h5 format
+    
+    :param curves_dir: Directory to curves and oids in cesium-like format
+    :param dataset: (str) training or test
+    :return: --
+    '''
+
+    # Load metadata
+    meta = pd.read_csv(f'../data/{dataset}_set_metadata.csv')
+
+    oids_paths = glob.glob(curves_dir + '/*.npy')
+
+    # For each chunk save corresponding meta part
+    for oids_path in tqdm.tqdm(oids_paths, total=len(oids_paths)):
+        oids = np.load(oids_path)
+        meta_name = oids_path.split('oids')[0] + 'meta.h5'
+        chunk_meta = meta[np.isin(meta['object_id'].values, oids)]
+        chunk_meta.to_hdf(meta_name, key='meta_df', mode='w')
+
 def load_lightcurves_from_path(full_dir_to_file):
     '''
     Load lightcurve data. Must provide full path and filename
@@ -256,9 +306,12 @@ def convert_chunks_to_lc_chunks(chunks_dir, n_batches, save_dir):
         pool.join()
 
 # os.chdir('..')
-# set_name = 'test'
+# set_name = 'training'
 # convert_chunks_to_lc_chunks(
 #     chunks_dir=os.getcwd() + f'/data/{set_name}_chunks',
 #     save_dir=os.getcwd() + f'/data/{set_name}_cesium_curves',
 #     n_batches=9,
 # )
+
+# ds = 'test'
+# store_metadata_by_chunks(f'../data/{ds}_cesium_curves', ds)

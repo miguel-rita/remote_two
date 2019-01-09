@@ -164,7 +164,6 @@ res = least_squares(
     fun=eqs,
     x0=x0,
     #bounds=bds,
-    loss='soft_l1'
 )
 
 x_sol = res['x']

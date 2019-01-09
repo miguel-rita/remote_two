@@ -2,6 +2,10 @@ import pandas as pd
 import numpy as np
 import tqdm
 
+'''
+Postprocessing gimmicks
+'''
+
 def build_prior_table(approx_freqs_dict):
     classes = np.sort(np.unique(np.array([int(s.split('_')[1]) for s in approx_freqs_dict.keys()])))
     lookup = {c: i for i, c in enumerate(classes)}

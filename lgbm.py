@@ -7,7 +7,7 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_sample_weight
 from sklearn.metrics import confusion_matrix
 
-from utils.misc_utils import plot_confusion_matrix, save_importances, save_submission
+from utils.misc_utils import plot_confusion_matrix, save_importances, save_submission, mask_samples
 
 '''
 LGBM Class definition
@@ -16,7 +16,7 @@ LGBM Class definition
 class LgbmModel:
     
     # Constructor
-    def __init__(self, train, test, y_tgt, selected_cols, output_dir, fit_params):
+    def __init__(self, train, test, y_tgt, selected_cols, output_dir, fit_params, mask_dict=None):
 
         # dataset
         self.train = train
@@ -25,6 +25,7 @@ class LgbmModel:
         self.selected_cols = selected_cols
 
         # other params
+        self.mask_dict = mask_dict
         self.output_dir = output_dir
         self.fit_params = fit_params
         self.class_weights_dict = {
@@ -48,6 +49,7 @@ class LgbmModel:
         self.class_weights = {i: self.class_weights_dict[c] for i, c in enumerate(self.class_codes)}
         self.label_encode = {c: i for i, c in enumerate(self.class_codes)}
         self.weights = np.array([self.class_weights[i] for i in range(len(self.class_weights))])
+
 
     def weighted_mc_crossentropy(self, y_true, y_pred, weighted=True):
         '''
@@ -85,8 +87,41 @@ class LgbmModel:
             predict_test = True
 
         # Compute sample weights
-        sample_weights = compute_sample_weight('balanced', self.y_tgt)
-    
+        if self.mask_dict is not None:
+            msk = mask_samples(self.y_tgt, self.mask_dict)
+            sample_weights = np.zeros(self.y_tgt.size)
+            # sample_weights[msk] = compute_sample_weight('balanced', self.y_tgt[msk])
+        else:
+            # sample_weights = compute_sample_weight('balanced', self.y_tgt)
+            sample_weights = np.zeros(self.y_tgt.size)
+            orig_weights = np.ones(shape=self.y_tgt.shape)
+
+            # Bias algorithm towards higher redshifts
+            rss = self.train['hostgal_specz'].values
+
+            # Load rs KDE ratios
+            # tx, cov_ratio = np.load('data/covariate_tx.npy'), np.load('data/covariate_ratio.npy')
+            # orig_weights *= np.interp(rss, tx, cov_ratio)
+            # np.save('data/rs_plus2_covar_beta.npy', orig_weights)
+
+            # Load covariate ratios
+            # orig_weights *= np.load('data/exp_covar_beta_v1.npy')
+
+            orig_weights *= (1 + 2*rss)
+
+            # Build dict with sum per target
+            sum_dict = {}
+            for tgt in np.unique(self.y_tgt):
+                sum_dict[tgt] = np.sum(orig_weights[self.y_tgt == tgt])
+
+            # Assign balanced weights
+            for i, tgt in enumerate(self.y_tgt):
+                sample_weights[i] = orig_weights[i] / sum_dict[tgt]
+
+            # Normalize weights
+            sample_weights /= np.mean(sample_weights)
+
+
         '''
         Setup CV
         '''
@@ -97,12 +132,14 @@ class LgbmModel:
             y_test = np.zeros((self.test.shape[0], self.weights.size))
         eval_losses = []
         imps = pd.DataFrame()
-    
+
         # Setup stratified CV
         num_folds = 5
         folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=1)
+        # self.train[self.selected_cols].to_hdf('data/train_feats_od.h5', key='w')
+        # self.test[self.selected_cols].to_hdf('data/test_feats_od.h5', key='w')
         x_all = self.train[self.selected_cols].values
-    
+
         for i, (_train, _eval) in enumerate(folds.split(self.y_tgt, self.y_tgt)):
     
             print(f'>   lgbm : Computing fold number {i} . . .')
@@ -111,7 +148,7 @@ class LgbmModel:
             x_train, y_train = x_all[_train], self.y_tgt[_train]
             x_eval, y_eval = x_all[_eval], self.y_tgt[_eval]
             sample_weights_train, sample_weights_eval = sample_weights[_train], sample_weights[_eval]
-    
+
             if predict_test:
                 x_test = self.test[self.selected_cols].values
     
@@ -127,7 +164,10 @@ class LgbmModel:
                 reg_lambda=self.fit_params['reg_lambda'],
                 min_child_samples=self.fit_params['min_child_samples'],
                 silent=self.fit_params['silent'],
-                verbose=-1,
+                bagging_fraction=self.fit_params['bagging_fraction'],
+                bagging_freq=self.fit_params['bagging_freq'],
+                bagging_seed=self.fit_params['bagging_seed'],
+                verbose=self.fit_params['verbose'],
             )
     
             # Train bst
@@ -140,7 +180,7 @@ class LgbmModel:
                 eval_names=['\neval_set'],
                 eval_class_weight=[self.class_weights],
                 early_stopping_rounds=15,
-                verbose=False,
+                verbose=self.fit_params['verbose'],
             )
     
             # Store oof preds, eval loss, define iteration name
