@@ -1,4 +1,4 @@
-# Kaggle PLAsTiCC Astronomical Classification - solo 70th place solution (out of 1094)
+# Kaggle PLAsTiCC Astronomical Classification - 70th place solution
 
 **Challenge summary:** multiclass classification of astronomical objects from their lightcurve timeseries data which is often sparse, unequally-spaced and noisy. Additionaly, the test set distribution is very different from the training set, containing much fainter and more distant objects, as well as a previously unseen object class (ie. not present in training)
 
@@ -77,7 +77,7 @@ Important items marked in bold. Note that not everything was pushed to the repo 
   - sn_confusion_study: EDA searching for differences between different supernovae types
   - sn_fit: experiments on supernovae model fitting
   - sub_analysis: visualization of submissions generated with LGBM models
-  - supernovae_exploration: further visualization of supernovae classes. See __sn_confusion_study__ above
+  - supernovae_exploration: further visualization of supernovae classes. See sn_confusion_study above
   - test_redshift: analysis on test set redshift
 - subs: store submissions here
 - subs_freq_probe: LB probing-related subs, class frequencies
